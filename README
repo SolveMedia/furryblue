@@ -1,0 +1,18 @@
+
+Furry Blue Database
+===================
+
+- distributed
+- eventually consistent
+- cross datacenter replication
+- rack aware
+- highly available
+- fully peer-to-peer
+- pluggable back ends: leveldb, rocksdb, etc.
+
+- not yet finished
+
+
+SEE ALSO
+  Amazon Dynamo
+

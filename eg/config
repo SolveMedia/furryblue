@@ -1,0 +1,98 @@
+# Copyright (c) 2009 by Jeff Weisberg
+# Author: Jeff Weisberg <jaw @ tcp4me.com>
+# Created: 2009-Dec-14 13:41 (EST)
+# Function: database config
+
+# starting port number, we use 3 ports starting from here
+port            3508
+# the port for the console. defaults to port + 2
+console         3510
+
+syslog          local4
+# the environment or realm to run in, so you can run multiple independent networks,
+# such as production, staging, and dev
+environment	prod
+
+# cross-datacenter communications will be encrypted
+secret          12password34
+
+# optionally, specify the datacenter and rack
+# otherwise, they will try to be inferred from the hostname
+datacenter      philadelphia
+rack            r43
+
+# how many cpus/cores does this system have (roughly)?
+# will be compared to other servers to balance load
+cpus            16
+
+# one thread per incoming connection
+tcp_threads      100
+udp_threads      4
+
+# outbound connection threads (many connections per thread)
+out_threads      8
+
+# allow connections from:
+allow		127.0.0.1
+allow           10.0.2.0/23
+
+# data is stored under:
+basedir         /home/aclogs
+
+# seed peers to locate the network at startup
+# specify at least 1. for high availability, 2 per datacenter
+seedpeer        10.0.1.10:3508
+seedpeer        10.0.1.11:3508
+seedpeer        10.0.2.10:3508
+seedpeer        10.0.2.11:3508
+
+
+# whop should get sent error messages?
+error_mailto	jaw@example.com
+error_mailfrom	"FurryBlue Daemon" <nobody@adcopy.com>
+
+
+# enable debugging?
+
+debuglevel	8
+
+#debug            network
+#debug            config
+#debug            kibitz_server
+#debug            kibitz_client
+#debug            peerdb
+#debug            peer
+#debug            xfer
+#debug            storage
+#debug            backend
+#debug            database
+#debug            expire
+#debug            server
+#debug            merkle
+#debug            partition
+#debug            ae
+#debug            client
+#debug            distrib
+#debug            crypto
+
+
+database test1 {
+    # file/directory name under basedir
+    dbfile      test1db
+    # which backend?
+    backend     leveldb
+    # automatically expire data after this long
+    # can use suffixes: (y)ears, (m)onths, (d)ays, (h)ours
+    expire      1y
+    # how many copies of the data (per datacenter) should there be?
+    # blank or 0 to have data replicated to all servers
+    # see [other docs] on configuring the partitioning
+    replicas    2
+}
+
+database test2 {
+    dbfile      test2db
+    backend     rocksdb
+    expire      3m
+}
+

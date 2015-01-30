@@ -1,0 +1,42 @@
+// Copyright (c) 2009 AdCopy
+// Author: Jeff Weisberg
+// Created: 2009-Apr-01 10:57 (EDT)
+// Function: anti-entropy merkle tree fetch+compare
+
+
+message ACPY2CheckValue {
+        required string         map             = 1;
+        optional int32          treeid          = 2;
+        optional int32          level           = 3;
+        required int64          version         = 4;
+        optional uint32         shard           = 5;
+        optional bytes          key             = 6;
+        optional bytes          hash            = 7;
+        optional int64          keycount        = 8;
+        optional int32          children        = 9;
+        optional bool           isvalid         = 10;
+};
+
+message ACPY2CheckRequest {
+        required string         map             = 1;
+        optional int32          treeid          = 2;
+        required int32          level           = 3;
+        required int64          version         = 4;
+        optional int32          maxresult       = 5;
+};
+
+message ACPY2CheckReply {
+        repeated ACPY2CheckValue check          = 1;
+};
+
+
+// on disk format of leaf nodes
+message ACPY2MerkleLeafRec {
+        required int64          version         = 1;
+        required uint32         shard           = 2;
+        required bytes          key             = 3;
+};
+message ACPY2MerkleLeaf {
+        repeated ACPY2MerkleLeafRec rec         = 1;
+};
+

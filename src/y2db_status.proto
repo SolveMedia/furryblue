@@ -1,0 +1,42 @@
+// Copyright (c) 2009 AdCopy
+// Author: Jeff Weisberg
+// Created: 2009-Mar-27 16:05 (EDT)
+// Function: yenta status exchanges
+
+import "std_ipport.proto";
+
+
+message ACPY2Status {
+        required string         hostname        = 1;
+        required string         datacenter      = 2;
+        optional string         rack            = 3;   // what rack is the server in
+	required string		subsystem	= 4;
+        required string         environment     = 5;
+        required string         via             = 6;
+        repeated ACPIPPort      ip              = 7;
+        required int32          status          = 8;
+        optional bool           uptodate        = 9;    // all databases are synced
+        required string         server_id       = 10;   // typically sys@name:port
+        optional string         path            = 12;   // for debugging
+
+        required int64          timesent        = 13;   // time of status created
+        required int64          timeconf        = 14;   // time of last config change
+        required int64          timeboot        = 15;
+        required int64          lastup          = 16;   // time last seen as up
+
+	optional int32		cpu_metric	= 17;	// amount of cpu power
+        optional int32          capacity_metric = 18;   // available disk space
+
+        repeated string         database        = 19;
+
+};
+
+message ACPY2StatusRequest {
+        optional ACPY2Status    myself          = 1;
+};
+
+message ACPY2StatusReply {
+        repeated ACPY2Status    status          = 1;
+};
+
+

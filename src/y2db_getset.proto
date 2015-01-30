@@ -1,0 +1,35 @@
+// Copyright (c) 2009 AdCopy
+// Author: Jeff Weisberg
+// Created: 2009-Apr-01 10:41 (EDT)
+// Function: get, set
+
+message ACPY2MapDatum {
+        required string         map             = 1;
+        optional uint32         shard           = 2;
+        required string         key             = 3;
+        optional int64          version         = 4;
+        optional bytes          value           = 5;
+        optional int32          op              = 6;
+        optional int64          expire          = 7;
+        optional bytes          file            = 8;
+};
+
+message ACPY2GetSet {
+        repeated ACPY2MapDatum  data            = 1;
+};
+
+message ACPY2DistRequest {
+        required int32          hop             = 1;
+        required int64          expire          = 2;
+        required string         sender          = 3;
+        required ACPY2MapDatum  data            = 4;
+};
+
+message ACPY2DistReply {
+	required int32		status_code	= 1;
+	required string		status_message	= 2;
+        required int32          result_code     = 3;
+        optional int64          conf_time       = 4;    // ring version - so client can detect reconfig
+};
+
+

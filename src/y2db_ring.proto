@@ -1,0 +1,21 @@
+// Copyright (c) 2014
+// Author: Jeff Weisberg <jaw @ solvemedia.com>
+// Created: 2014-Dec-04 12:03 (EST)
+// Function: partition ring conf
+
+
+message ACPY2RingPartConf {
+        required string         server          = 1;
+        optional string         datacenter      = 2;
+        optional string         rack            = 3;
+        repeated uint32         shard           = 4;
+};
+
+message ACPY2RingConf {
+        required int32          version         = 1;    // current version = 1
+        required int32          replicas        = 2;
+        required int32          ringbits        = 3;
+
+        repeated ACPY2RingPartConf      part    = 4;
+};
+
