@@ -9,9 +9,10 @@ message ACPY2MapDatum {
         required string         key             = 3;
         optional int64          version         = 4;
         optional bytes          value           = 5;
-        optional int32          op              = 6;
+        repeated string         program         = 6;	// [function, arg, arg, ... ]
         optional int64          expire          = 7;
         optional bytes          file            = 8;
+        optional int64          conf_time       = 9;    // ring version - so client can detect reconfig
 };
 
 message ACPY2GetSet {
