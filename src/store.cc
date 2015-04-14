@@ -112,6 +112,7 @@ store_get(const char *db, ACPY2MapDatum *res){
     Database *be = find(db);
     if(!be) return 0;
 
+    res->set_conf_time( be->ring_version() );
     return be->get(res);
 }
 

@@ -4,6 +4,7 @@
 // Function: partition ring conf
 
 
+// on disk
 message ACPY2RingPartConf {
         required string         server          = 1;
         optional string         datacenter      = 2;
@@ -17,5 +18,22 @@ message ACPY2RingConf {
         required int32          ringbits        = 3;
 
         repeated ACPY2RingPartConf      part    = 4;
+};
+
+
+// on wire
+message ACPY2RingConfReq {
+        required string         map             = 1;
+        optional string         datacenter      = 2;
+};
+
+message ACPY2RingPart {
+        required uint32         shard           = 1;
+        repeated string         server          = 2;
+};
+
+message ACPY2RingConfReply {
+        required int64          version         = 1;
+        repeated ACPY2RingPart  part            = 2;
 };
 

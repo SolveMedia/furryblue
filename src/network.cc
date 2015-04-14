@@ -61,6 +61,7 @@ static int report_load(NTD*);
 
 extern void install_handler(int, void(*)(int));
 extern int  y2_status(NTD*);
+extern int  y2_ringcf(NTD*);
 extern int  api_get(NTD*);
 extern int  api_put(NTD*);
 extern int  api_check(NTD*);
@@ -95,6 +96,7 @@ static struct {
     { api_get },
     { api_put },
     { api_check },
+    { y2_ringcf },
 
     // ...
 };

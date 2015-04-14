@@ -14,6 +14,7 @@
 #include "misc.h"
 #include "thread.h"
 #include "network.h"
+#include "netutil.h"
 #include "hrtime.h"
 #include "peers.h"
 #include "store.h"
@@ -1020,6 +1021,60 @@ report_ring_json(NTD *ntd){
 
     return sz;
 }
+
+void
+Ring::get_conf(ACPY2RingConfReply *res) const {
+
+    if( !_part ) return;
+
+    _lock.r_lock();
+    res->set_version( _version );
+
+    for(int i=0; i<_part->size(); i++){
+        Partition *p = _part->at(i);
+        RP_DC *dc = p->_dc[0];
+
+        if( ! dc->_is_boundary ) continue;
+
+        ACPY2RingPart *r = res->add_part();
+        r->set_shard( p->_shard );
+        int n = dc->_server.size();
+
+        for(int s=0; s<n; s++){
+            r->add_server( dc->_server[s]->id );
+        }
+    }
+
+    _lock.r_unlock();
+}
+
+int
+y2_ringcf(NTD *ntd){
+    protocol_header *phi = (protocol_header*) ntd->gpbuf_in;
+    ACPY2RingConfReq   req;
+    ACPY2RingConfReply res;
+
+    if( !(phi->flags & PHFLAG_WANTREPLY) ) return 0;
+
+    // parse request
+    req.ParsePartialFromArray( ntd->in_data(), phi->data_length );
+    DEBUG("req l=%d, %s", phi->data_length, req.ShortDebugString().c_str());
+
+    if( ! req.IsInitialized() ){
+        DEBUG("invalid request. missing required fields");
+        return 0;
+    }
+
+    for(int i=0; i<allring.size(); i++){
+        if( req.map() == allring[i]->name() ) allring[i]->get_conf( &res );
+    }
+
+    DEBUG("res %s", res.ShortDebugString().c_str());
+
+    // serialize + reply
+    return serialize_reply(ntd, &res, 0);
+}
+
 
 //################################################################
 
