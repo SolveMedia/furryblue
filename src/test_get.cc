@@ -10,6 +10,7 @@
 #include "defs.h"
 #include "misc.h"
 #include "diag.h"
+#include "config.h"
 #include "network.h"
 #include "netutil.h"
 #include "hrtime.h"

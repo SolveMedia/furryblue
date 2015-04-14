@@ -10,6 +10,7 @@
 #include "defs.h"
 #include "misc.h"
 #include "diag.h"
+#include "config.h"
 #include "network.h"
 #include "netutil.h"
 #include "hrtime.h"
@@ -42,6 +43,7 @@ void sendreq(void);
   -c 100 => 7000/sec
 */
 
+Config *config = 0;
 const char *database = "test3";
 int num_sent = 0;
 int numreq   = NUMREQ;
