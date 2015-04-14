@@ -19,6 +19,7 @@ class Ring;
 class Peer;
 class Database;
 class ACPY2DistRequest;
+class ACPY2RingConfReply;
 
 class RP_Server {
 
@@ -99,6 +100,7 @@ public:
     RP_Server *random_peer(int part, const NetAddr *b=0);		// for AE
     bool report_txt(std::ostringstream&) const;
     bool report_json(std::ostringstream&) const;
+    void get_conf(ACPY2RingConfReply*) const;
     void repartitioner(void);
     bool repartitioner_expand(int, int, int*, int64_t*);
     bool repartitioner_contract(int, int, int*, int64_t*);

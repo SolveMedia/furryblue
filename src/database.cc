@@ -34,6 +34,9 @@
 Mutex datalock[NDBLOCK];
 
 
+extern bool run_program(ACPY2MapDatum *req);
+
+
 Database::Database(DBConf *cf){
 
     // convert to microsecs
@@ -114,7 +117,6 @@ Database::want_it(const string& key, int64_t ver){
     return 0;
 }
 
-
 // 1 => stored ok
 // 0 => did not want
 int
@@ -164,6 +166,19 @@ Database::put(ACPY2MapDatum *req, int *opart){
         }
 
         _merk->del( req->key(), treeid, pr->shard, pr->ver );
+
+        // run update program?
+        int dsize = old.size() - sizeof(DBRecord);
+        if( dsize > 0 && req->program_size() ){
+            // get current value
+            req->set_value( pr->value, dsize );
+            // run prog. it should alter req->value
+            if( !run_program( req ) ){
+                // failed
+                datalock[ lockno ].unlock();
+                return DBPUTST_BAD;
+            }
+        }
     }
 
     // RSN - perform op

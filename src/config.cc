@@ -163,6 +163,7 @@ static struct {
     { "partition",	  'R' },
     { "ae",		  'A' },
     { "client",           'I' },
+    { "script",		  'j' },
 };
 
 static void

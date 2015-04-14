@@ -9,6 +9,7 @@ PROTO = heartbeat.o std_ipport.o std_reply.o y2db_crypto.o y2db_getset.o y2db_ch
 OBJS =  lock.o diag.o misc.o config.o daemon.o thread.o network.o protocol.o netutil.o crypto.o base64.o \
 	kibitz_myself.o kibitz_server.o kibitz_client.o peers.o peerdb.o clientio.o console.o conscmd.o \
 	server.o store.o database.o merkle.o expire.o backend.o partition.o distrib.o ae.o \
+	duktape.o program.o \
 	furryblue.o
 
 OBJS += be_leveldb.o
@@ -20,7 +21,7 @@ OBJS += be_rocksdb.o
 # import site-wide compiler options
 include ../../Makefile.inc
 
-CFLAGS = -g  $(FLAGS) -O3 -ffast-math -pthreads -I. -I`pwd`/../inc  -I/usr/local/include -I/usr/sfw/include -I$(LOCALDIR)/include
+CFLAGS = -g  $(FLAGS) -O3 -pthreads -I. -I`pwd`/../inc  -I/usr/local/include -I/usr/sfw/include -I$(LOCALDIR)/include
 CCFLAGS=$(CFLAGS)
 LDFLAGS = -L$(LOCALDIR)/lib -L/usr/sfw/lib/amd64 -lprotobuf -lpthread -lrt -lsocket -lnsl -lgen -lssl -lcrypto -lz -lsendfile -lleveldb -lrocksdb
 PCC=protoc

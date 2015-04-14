@@ -335,7 +335,7 @@ sub distribute {
     my $key  = shift;
     my $ver  = shift;
     my $val  = shift;
-    # ...
+    my $prog = shift;	# [ jsfunc, arg, arg, ... ]
 
     return unless $key && $ver;
     $me->{retries} = 25 unless $me->{retries};
@@ -353,7 +353,7 @@ sub distribute {
             key		=> $key,
             version	=> $ver,
             value	=> $val,
-
+            program	=> $prog,
         } ]
     } );
 

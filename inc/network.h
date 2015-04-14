@@ -54,6 +54,7 @@ typedef struct {
 # define PHMT_Y2_GET		33
 # define PHMT_Y2_DIST		34
 # define PHMT_Y2_CHECK		35
+# define PHMT_Y2_RINGCF		36
 
 
 // ...
