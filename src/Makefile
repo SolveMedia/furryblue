@@ -22,7 +22,7 @@ include ../../Makefile.inc
 
 CFLAGS = -g  $(FLAGS) -O3 -ffast-math -pthreads -I. -I`pwd`/../inc  -I/usr/local/include -I/usr/sfw/include -I$(LOCALDIR)/include
 CCFLAGS=$(CFLAGS)
-LDFLAGS = -L$(LOCALDIR)/lib -L/usr/sfw/lib/amd64 -lprotobuf -lpthread -lrt -lsocket -lnsl -lmtmalloc -lgen -lssl -lcrypto -lz -lsendfile -lleveldb -lrocksdb
+LDFLAGS = -L$(LOCALDIR)/lib -L/usr/sfw/lib/amd64 -lprotobuf -lpthread -lrt -lsocket -lnsl -lgen -lssl -lcrypto -lz -lsendfile -lleveldb -lrocksdb
 PCC=protoc
 CVT=../../../tools/proto2pl
 
