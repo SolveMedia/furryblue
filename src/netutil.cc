@@ -347,14 +347,14 @@ read_proto(NTD *ntd, int reqp, int to){
     }
 
     if( ph->data_length > ntd->in_size - sizeof(protocol_header) ){
-        ntd->in_resize( ph->data_length + sizeof(protocol_header) );
+         ntd->in_resize( ph->data_length + sizeof(protocol_header) );
         ph = (protocol_header*) ntd->gpbuf_in;
     }
 
     // read gpb
     if( ph->data_length ){
 
-        DEBUG("reading protobuf");
+        DEBUG("reading protobuf %d", ph->data_length);
 
         int len = 0;
         char *buf = ntd->gpbuf_in + sizeof(protocol_header);
@@ -394,7 +394,6 @@ read_proto(NTD *ntd, int reqp, int to){
 int
 make_request(NetAddr *addr, int reqno, int to, google::protobuf::Message *g, google::protobuf::Message *res){
     NTD ntd;
-    protocol_header *phi = (protocol_header*) ntd.gpbuf_in;
     protocol_header *pho = (protocol_header*) ntd.gpbuf_out;
     int s = 0;
 
@@ -418,10 +417,13 @@ make_request(NetAddr *addr, int reqno, int to, google::protobuf::Message *g, goo
         return 0;
     }
 
+    protocol_header *phi = (protocol_header*) ntd.gpbuf_in;
+
     if( phi->flags & PHFLAG_ISERROR ){
         return 0;
     }
 
+    DEBUG("recvd %d", phi->data_length);
     res->ParsePartialFromArray( ntd.in_data(), phi->data_length );
     DEBUG("recv l=%d, %s", phi->data_length, res->ShortDebugString().c_str());
 
