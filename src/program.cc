@@ -42,6 +42,7 @@ run_program(ACPY2MapDatum *req){
     }
 
     if( req->has_value() ){
+        DEBUG("this: %s", req->mutable_value()->c_str());
         duk_push_string(ctx, req->mutable_value()->c_str());
 
         if( duk_safe_call(ctx, json_decode, 0, 0) ){
@@ -54,10 +55,11 @@ run_program(ACPY2MapDatum *req){
 
     int args = req->program_size();
     for(int i=1; i<args; i++){
+        DEBUG("arg[%d]: %s", i, req->mutable_program(i)->c_str());
         duk_push_string(ctx, req->mutable_program(i)->c_str());
     }
 
-    if( duk_pcall_method(ctx, args-1) ){
+    if( duk_pcall(ctx, args) ){
         PROBLEM("javascript error: %s: %s", duk_safe_to_string(ctx, -1), req->mutable_program(0)->c_str());
         duk_destroy_heap(ctx);
         return 0;
@@ -69,6 +71,7 @@ run_program(ACPY2MapDatum *req){
         const char *r = duk_safe_to_string(ctx, -1);
 
         req->set_value( r );
+        DEBUG("res: %s", r);
         ok = 1;
     }
 
