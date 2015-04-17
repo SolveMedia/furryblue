@@ -156,9 +156,10 @@ Database::put(ACPY2MapDatum *req, int *opart){
 
     _get('d', req->key(), &old);
 
+    pr = (DBRecord*) old.data();
+
     if( old.size() ){
         // check versions
-        pr = (DBRecord*) old.data();
         if( pr->ver >= req->version() ){
             DEBUG("outdated version");
             datalock[ lockno ].unlock();
@@ -166,22 +167,28 @@ Database::put(ACPY2MapDatum *req, int *opart){
         }
 
         _merk->del( req->key(), treeid, pr->shard, pr->ver );
+    }
 
-        // run update program?
+    // run update program?
+    //   update + prog | insert + no value
+    if( req->program_size() && (old.size() || ! req->has_value()) ){
+
         int dsize = old.size() - sizeof(DBRecord);
-        if( dsize > 0 && req->program_size() ){
+        if( dsize > 0 ){
             // get current value
             req->set_value( pr->value, dsize );
-            // run prog. it should alter req->value
-            if( !run_program( req ) ){
-                // failed
-                datalock[ lockno ].unlock();
-                return DBPUTST_BAD;
-            }
+        }
+        // run prog. it should alter req->value
+        if( !run_program( req ) ){
+            // failed
+            datalock[ lockno ].unlock();
+            return DBPUTST_BAD;
         }
     }
 
-    // RSN - perform op
+    // only the origin runs the program
+    // remove it, and only propagate the value
+    req->clear_program();
 
     // build record to insert
     int dsize = req->value().size();
