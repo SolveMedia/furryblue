@@ -293,10 +293,12 @@ sub _getset {
 
     if( $me->{servertime} < $now - $OLDAGE ){
         $me->_read_server_list();
+        die "no FBDB servers available\n" unless $me->{allservers} && @{$me->{allservers}};
     }
 
     if( $me->{ringtime} < $now - $OLDAGE ){
         $me->_read_ringcf();
+        die "cannot find ring config for '$me->{map}'\n" unless $me->{ring} && @{$me->{ring}};
     }
 
     my $serv = $me->_servers_for_key( $key );
