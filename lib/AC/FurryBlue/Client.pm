@@ -179,8 +179,10 @@ sub _read_ringcf {
 
     my $res = $me->_send_request( \@s, $req );
 
-    return unless $res;
-    return if $res->{data}{version} <= $me->{ringver};
+    $me->{ringtime} = time();
+
+    return unless $res;	# not sharded
+    return if $res->{data}{version} <= $me->{ringver};	# we already have current version
 
     my @ring;
     for my $p ( @{$res->{data}{part}} ){
@@ -190,7 +192,6 @@ sub _read_ringcf {
     @ring = sort { $a->{shard} <=> $b->{shard} } @ring;
     $me->{ring} = \@ring;
     $me->{ringver} = $res->{data}{version};
-    $me->{ringtime} = time();
 
 }
 
@@ -207,9 +208,13 @@ sub _servers_for_key {
 
     # not sharded? all servers
     if( ! $me->{ring} ){
-        return $me->{mapservers} if $me->{mapservers};
-        return $me->{allservers};
-        return ;
+        my @s;
+
+        @s = @{ $me->{mapservers} } if $me->{mapservers};
+        @s = @{ $me->{allservers} } unless @s;
+
+        shuffle(\@s);
+        return \@s;
     }
 
     my $shard = $me->_shard($key);
@@ -242,6 +247,8 @@ sub _send_request {
     my $tries = $me->{retries} + 1;
     my $copy  = $me->{copies} || 1;
     my $delay = 0.25;
+
+    $tries = $copy if $tries < $copy;
 
     my $s = shift @$serv;
 
@@ -298,7 +305,6 @@ sub _getset {
 
     if( $me->{ringtime} < $now - $OLDAGE ){
         $me->_read_ringcf();
-        die "cannot find ring config for '$me->{map}'\n" unless $me->{ring} && @{$me->{ring}};
     }
 
     my $serv = $me->_servers_for_key( $key );
