@@ -355,7 +355,7 @@ sub distribute {
     }, {
         sender		=> "$HOSTNAME/$$",
         hop		=> 0,
-        expire		=> time() + 120,
+        expire		=> (time() + 30) * 1000000,	# usec
         data	=> [ {
             map		=> $me->{map},
             key		=> $key,
