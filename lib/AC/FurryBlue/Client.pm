@@ -311,8 +311,9 @@ sub _getset {
     my $res  = $me->_send_request($serv, $req, undef);
 
     # mark ringcf as out-of-date, if we see it changed
-    if( $res && $res->{data} && $res->{data}{data} ){
-        $me->{ringtime} = 0 if $res->{data}{data}{conf_time} && $me->{ringver} != $res->{data}{data}{conf_time};
+    if( $res && $res->{data} && $res->{data}{data} && $res->{data}{data}[0] ){
+        my $t = $res->{data}{data}[0]{conf_time};
+        $me->{ringtime} = 0 if $t && $me->{ringver} != $t;
     }
 
     return $res;
