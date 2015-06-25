@@ -58,6 +58,7 @@ sub new {
         proto      => AC::DC::Protocol->new(),
         datacenter => my_datacenter(),
         copies     => 1,
+        timeout    => 10,
 
         # servers { id => {addr, port, ...} }
         # mapservers []	 - have our map
