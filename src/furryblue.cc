@@ -114,7 +114,9 @@ main(int argc, char **argv){
      // init subsystems
      // ...
      start_thread( runmode_manage, 0, 1 );
-     // start_thread( reload_config, (void*)filename_config );
+
+     if( filename_config[0] == '/' )
+         start_thread( reload_config, (void*)filename_config, 0 );
 
      myself_init();
      store_init();
