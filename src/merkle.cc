@@ -124,24 +124,30 @@ Merkle::add(const string& key, int treeid, int shard, int64_t ver){
     ACPY2MerkleLeaf l;
 
     DEBUG("leaf %d %016llX => %s %d", treeid, ver, mkey.c_str(), ln);
+    hrtime_t t0 = hr_usec();
 
     // get leaf node, append, write
     _nlock[ln].lock();
+    hrtime_t t1 = hr_usec();
 
 #ifdef LEAFCACHE
     string *val = leafcache_get(ln, mkey);
+    hrtime_t t2 = hr_usec();
 
     l.ParsePartialFromString( *val );
     ACPY2MerkleLeafRec *rec = l.add_rec();
     rec->set_key(     key );
     rec->set_version( ver );
     rec->set_shard(   shard );
+    hrtime_t t3 = hr_usec();
     // keep them in sorted order
     google::protobuf::RepeatedPtrField<ACPY2MerkleLeafRec> *lc = l.mutable_rec();
     std::sort( lc->begin(), lc->end(), sort_leafrec_compare );
+    hrtime_t t4 = hr_usec();
 
     l.SerializeToString( val );
     leafcache_set(ln, treeid, ver, l.rec_size() );
+    hrtime_t t5 = hr_usec();
 
 #else
     string val;
@@ -161,8 +167,11 @@ Merkle::add(const string& key, int treeid, int shard, int64_t ver){
     q_leafnext( treeid, ver, l.rec_size(), &val );
 
 #endif
+    hrtime_t t6 = hr_usec();
 
     _nlock[ln].unlock();
+
+    // VERBOSE("merk/timing: %d %d %d %d %d %d", (int)(t1-t0), (int)(t2-t1), (int)(t3-t2), (int)(t4-t3), (int)(t5-t4), (int)(t6-t5));
 
 }
 

@@ -159,6 +159,8 @@ int
 Ring::distrib(int part, ACPY2DistRequest *req){
 
     DEBUG("distrib");
+    DEBUG("req %s", req->ShortDebugString().c_str());
+
     if( req->has_sender() && req->hop() > MAXHOP )
         return 0;
     if( req->has_expire() && req->expire() < hr_usec() )

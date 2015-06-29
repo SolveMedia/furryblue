@@ -142,7 +142,8 @@ Database::put(ACPY2MapDatum *req, int *opart){
     int treeid = _ring->treeid(part);
     int lockno = req->shard() % NDBLOCK;
 
-    DEBUG("part %d tree %x", part, treeid);
+    hrtime_t t0 = hr_usec();
+    DEBUG("shard %x part %d tree %x lock %d", req->shard(), part, treeid, lockno);
     // is this partition on this server?
     if( !_ring->is_local(part) ){
         DEBUG("not local");
@@ -153,8 +154,10 @@ Database::put(ACPY2MapDatum *req, int *opart){
     DBRecord *pr = 0;
 
     datalock[ lockno ].lock();
+    hrtime_t t1 = hr_usec();
 
     _get('d', req->key(), &old);
+    hrtime_t t2 = hr_usec();
 
     pr = (DBRecord*) old.data();
 
@@ -168,6 +171,7 @@ Database::put(ACPY2MapDatum *req, int *opart){
 
         _merk->del( req->key(), treeid, pr->shard, pr->ver );
     }
+    hrtime_t t3 = hr_usec();
 
     // run update program?
     //   update + prog | insert + no value
@@ -185,6 +189,7 @@ Database::put(ACPY2MapDatum *req, int *opart){
             return DBPUTST_BAD;
         }
     }
+    hrtime_t t4 = hr_usec();
 
     // only the origin runs the program
     // remove it, and only propagate the value
@@ -201,15 +206,19 @@ Database::put(ACPY2MapDatum *req, int *opart){
     memcpy(nr->value, req->value().data(), dsize);
 
     DEBUG("put '%s' [%d]", req->key().c_str(), rsize);
+    hrtime_t t5 = hr_usec();
 
     _put('d', req->key(), rsize, (uchar*)nr);
+    hrtime_t t6 = hr_usec();
 
     _merk->add( req->key(), treeid, req->shard(), req->version() );
+    hrtime_t t7 = hr_usec();
     datalock[ lockno ].unlock();
 
     // only add it, if it is not the default expire
     if( req->has_expire() ) _expr->add( req->key(), exp );
 
+    // VERBOSE("timing: %d %d %d %d %d %d %d", (int)(t1-t0), (int)(t2-t1), (int)(t3-t2), (int)(t4-t3), (int)(t5-t4), (int)(t6-t5), (int)(t7-t6));
     free(nr);
     return DBPUTST_DONE;
 }
