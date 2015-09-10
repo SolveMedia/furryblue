@@ -337,7 +337,9 @@ sub get {
         } ]
     } );
 
-    return $me->_getset($key, $req);
+    my $res = $me->_getset($key, $req);
+    return unless $res && $res->{data}{data};
+    return $res->{data}{data}[0];
 }
 
 sub distribute {
