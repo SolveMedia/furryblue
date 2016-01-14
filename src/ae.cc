@@ -42,6 +42,7 @@ bool
 Database::ae(void){
     bool ok = 1;
     int npart = _ring->num_parts();
+    int nsync = 0;
 
     DEBUG("ae %s %d", _name.c_str(), npart);
     for(int p=0; p<npart; p++ ){
@@ -50,8 +51,9 @@ Database::ae(void){
         // compare merkle tree with random peer
         RP_Server *s = _ring->random_peer(p);
         if( !s ) continue;
-        int r = _merk->ae(p, treeid, & s->bestaddr);
+        int r = _merk->ae(p, treeid, & s->bestaddr, &nsync);
         if( !r ) ok = 0;
+        VERBOSE("ae %s ok=%d synced=%d", _name.c_str(), r, nsync);
     }
 }
 
@@ -133,7 +135,7 @@ highest_level(ACPY2CheckReply &r){
 // RSN - multithread
 
 bool
-Merkle::ae(int part, int treeid, NetAddr *peer){
+Merkle::ae(int part, int treeid, NetAddr *peer, int *nsync){
     bool ok  = 1;
     int errs = 0;
     ACPY2CheckRequest req;
@@ -148,6 +150,7 @@ Merkle::ae(int part, int treeid, NetAddr *peer){
     req.set_map( _be->_name );
     req.set_treeid( treeid );
     req.set_maxresult( 256 );
+    *nsync = 0;
 
     // start at the root
     add_todo( badnode, MERKLE_HEIGHT - MERKLE_BUILD, 0 );
@@ -214,6 +217,7 @@ Merkle::ae(int part, int treeid, NetAddr *peer){
         }
     }
 
+    *nsync = needkey.size();
     if( ! ae_fetch( part, &needkey, peer ) ) ok = 0;
 
     return ok;

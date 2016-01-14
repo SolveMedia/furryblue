@@ -82,7 +82,7 @@ public:
     int  get(int, int, int64_t, ACPY2CheckReply *);
     void flush(void);
     void check(void);
-    bool ae(int, int, NetAddr*);
+    bool ae(int, int, NetAddr*, int*);
     bool ae_fetch(int, deque<string>*, NetAddr*);
     bool compare_result(MerkleCache*, ACPY2CheckValue*);
     bool repartition(int, int64_t*);
