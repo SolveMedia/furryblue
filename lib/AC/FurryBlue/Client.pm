@@ -137,6 +137,7 @@ sub _read_server_list {
 
     for my $r ( @{$res->{data}{status}} ){
         next if $me->{env} && $me->{env} ne $r->{environment};
+        next unless $r->{status} == 200;
         my $id = $r->{server_id};
         my $s = {
             id		=> $id,
