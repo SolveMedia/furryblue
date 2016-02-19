@@ -6,7 +6,7 @@
 message ACPY2MapDatum {
         required string         map             = 1;
         optional uint32         shard           = 2;
-        required string         key             = 3;
+        required bytes          key             = 3;
         optional int64          version         = 4;
         optional bytes          value           = 5;
         repeated string         program         = 6;	// [function, arg, arg, ... ]
