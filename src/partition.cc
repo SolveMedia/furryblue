@@ -161,7 +161,7 @@ ring_server_update(const Peer* p, const char *msg){
     }
 
     s->is_uptodate        = p->is_uptodate();
-    s->is_up              = p->is_up();
+    s->is_up              = p->is_avail();
     s->last_conf          = p->last_conf();
     s->bestaddr.port      = p->bestaddr.port;
     s->bestaddr.same_dc   = p->bestaddr.same_dc;

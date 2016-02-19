@@ -40,6 +40,7 @@ Peer::Peer(const ACPY2Status *g){
     _num_fail  = 0;
     _last_try  = 0;
     _last_up   = 0;
+    _available = 0;
     _id        = _gstatus->server_id().c_str();
     _last_conf = _gstatus->timeconf();
 
@@ -89,6 +90,7 @@ Peer::update(const ACPY2Status *g){
     _id = _gstatus->server_id().c_str();
     int64_t oldcft = _last_conf;
     _last_conf     = _gstatus->timeconf();
+    _available     = _gstatus->status() == 200;
 
     if( _last_conf != oldcft ) ring_server_update( this, "cft" );
 }

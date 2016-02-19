@@ -30,6 +30,7 @@ class ACPY2StatusReply;
 class Peer {
     // local status + timestamps
     int			_status;
+    bool		_available;
     int			_num_fail;
     hrtime_t		_last_try;
     hrtime_t		_last_up;
@@ -53,6 +54,7 @@ protected:
 public:
     int  status(void) const { return _status; }
     bool is_up(void) const { return _status == PEER_STATUS_UP; }
+    bool is_avail(void) const { return (_status == PEER_STATUS_UP) && _available; }
     const char *get_id(void) const { return _id; }
     bool has_db(const char *) const;
     bool is_uptodate(void) const;
