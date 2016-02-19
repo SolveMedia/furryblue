@@ -134,6 +134,8 @@ sub _read_server_list {
     return unless $res;
 
     my @ms;
+    my @msood;
+    my @msfar;
 
     for my $r ( @{$res->{data}{status}} ){
         next if $me->{env} && $me->{env} ne $r->{environment};
@@ -154,13 +156,27 @@ sub _read_server_list {
         $s->{port} = $best->{port};
         $me->{servers}{$id} = $s;
 
-        if( $s->{is_local} && grep { $me->{map} eq $_ } @{$r->{database}} ){
+        next unless grep { $me->{map} eq $_ } @{$r->{database}};
+
+        if( $s->{uptodate} && $s->{is_local} ){
             push @ms, $s;
+        }elsif( $s->{uptodate} ){
+            push @msfar, $s;
+        }else{
+            push @msood, $s;
         }
+
     }
 
     $me->{servertime} = time();
-    $me->{mapservers} = \@ms if @ms;
+    if( @ms ){
+        $me->{mapservers} = \@ms;
+    }elsif( @msfar ){
+        $me->{mapservers} = \@msfar;
+    }else{
+        $me->{mapservers} = \@msood;
+    }
+
     $me->_make_server_list();
 }
 
