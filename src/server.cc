@@ -18,6 +18,7 @@
 #include "database.h"
 #include "store.h"
 #include "stats.h"
+#include "runmode.h"
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -73,6 +74,10 @@ api_put(NTD *ntd){
     if( ! req.IsInitialized() ){
         DEBUG("invalid request. missing required fields");
         return 0;
+    }
+
+    if( runmode.is_stopping() ){
+        return reply_error(ntd, 500, "shutting down");
     }
 
     // process requests
