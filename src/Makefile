@@ -61,6 +61,9 @@ test_hammer: test_hammer.o $(TESTOBJ) clientio.o lock.o thread.o
 test_crypto: test_crypto.o $(TESTOBJ) crypto.o auth.o base64.o
 	$(CCC) -o test_crypto test_crypto.o crypto.o auth.o base64.o $(TESTOBJ) $(CFLAGS) $(LDFLAGS)
 
+test_rocksdb: test_rocksdb.cc
+	$(CCC) -std=c++11 -o test_rocksdb test_rocksdb.cc $(CFLAGS) $(LDFLAGS)
+
 
 # rocksdb needs c++11
 be_rocksdb.o:

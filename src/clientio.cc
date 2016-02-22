@@ -54,7 +54,7 @@ static Mutex polllock;	// lock on the poll
 static RWLock dslock;	// lock on our data structures
 
 static vector<ClientIO*> clvec;	// [fd]
-static int clstart = 0;
+static int clstart = 0;		// current position
 
 
 
@@ -82,7 +82,7 @@ clientio_underway(void){
         if(!c) continue;
         n ++;
     }
-    dslock.w_unlock();
+    dslock.r_unlock();
     //VERBOSE("underway %d", n);
     return n;
 }
@@ -124,6 +124,10 @@ build_pfd(struct pollfd *pfd){
             pfd[n].fd = c->_fd;
             pfd[n].events = POLLIN;
             n ++;
+            break;
+
+        case STATE_TRASH:
+            delete c;
             break;
 
         default:
@@ -242,6 +246,7 @@ ClientIO::ClientIO(const NetAddr& addr, int reqno, const google::protobuf::Messa
     string buf;
     req->SerializeToString( &buf );
 
+    // encrypt inter-datacenter communications
     int is_enc = 0;
     if( ! addr.same_dc ){
         int sz = acp_encrypt( buf.data(), buf.size(), &buf );
@@ -289,6 +294,13 @@ ClientIO::start(void){
     init_tcp(_fd);
     set_nbio(_fd);
 
+    _wrpos = 0;
+    _rlen  = 0;
+    _rbuf.clear();
+    _rbuf.reserve( BUFSIZE );
+    _state = STATE_CONNECTING;
+    if( _rel_timeout ) _timeout = lr_now() + _rel_timeout;
+
     dslock.w_lock();
     if( _fd >= clvec.size() )
         clvec.resize( _fd + 1, 0 );
@@ -305,13 +317,6 @@ ClientIO::start(void){
         DEBUG("cannot connect: %s", strerror(errno));
         do_error("connect failed");
     }
-
-    _wrpos = 0;
-    _rlen  = 0;
-    _rbuf.clear();
-    _rbuf.reserve( BUFSIZE );
-    _state = STATE_CONNECTING;
-    if( _rel_timeout ) _timeout = lr_now() + _rel_timeout;
 
 }
 
@@ -405,6 +410,7 @@ ClientIO::do_read(void){
     _rbuf.append(buf, r);
 
     if( !_rlen && (_rbuf.size() >= sizeof(protocol_header)) ){
+        // determine length of message
         protocol_header *ph = (protocol_header*) _rbuf.data();
         _rlen = sizeof(protocol_header) + ntohl(ph->auth_length) + ntohl(ph->data_length) + ntohl(ph->content_length);
         if( _rlen >= INSANE || ntohl(ph->version) != PHVERSION ){
@@ -412,7 +418,6 @@ ClientIO::do_read(void){
             return;
         }
     }
-
 
     if( _rlen && (_rbuf.size() >= _rlen) && (_state == STATE_READING) ){
         _state = STATE_WORKING;

@@ -161,7 +161,8 @@ ring_server_update(const Peer* p, const char *msg){
     }
 
     s->is_uptodate        = p->is_uptodate();
-    s->is_up              = p->is_avail();
+    s->is_up              = p->is_up();
+    s->is_avail		  = p->is_avail();
     s->last_conf          = p->last_conf();
     s->bestaddr.port      = p->bestaddr.port;
     s->bestaddr.same_dc   = p->bestaddr.same_dc;
@@ -176,6 +177,7 @@ RP_Server::RP_Server(const Peer *p){
     rack	= p->get_rack();
     bestaddr    = p->bestaddr;
     is_up       = p->is_up();
+    is_avail    = p->is_avail();
     is_uptodate = p->is_uptodate();
     last_conf   = p->last_conf();
 }
@@ -183,6 +185,7 @@ RP_Server::RP_Server(const Peer *p){
 RP_Server::RP_Server(const char *name){
     id            = name;
     is_up         = 0;
+    is_avail      = 0;
     is_uptodate   = 0;
     last_conf     = 0;
     bestaddr.name = name;

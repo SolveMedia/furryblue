@@ -92,7 +92,7 @@ Peer::update(const ACPY2Status *g){
     _last_conf     = _gstatus->timeconf();
     _available     = _gstatus->status() == 200;
 
-    if( _last_conf != oldcft ) ring_server_update( this, "cft" );
+    ring_server_update( this, "cft" );
 }
 
 void

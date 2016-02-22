@@ -14,6 +14,7 @@
 #include "hrtime.h"
 #include "thread.h"
 #include "runmode.h"
+#include "store.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -43,7 +44,8 @@ usage(void){
     fprintf(stderr, MYNAME " [options]\n"
 	    "  -f    foreground\n"
 	    "  -d    enable debugging\n"
-	    "  -c config file\n");
+	    "  -c config file\n"
+        );
     exit(0);
 }
 
@@ -54,12 +56,13 @@ main(int argc, char **argv){
      int prev_status = 0;
      int save_argc = argc;
      char **save_argv = argv;
+     const char *upgradedb=0;
      int c;
 
      srandom( time(0) );
 
      // parse command line
-     while( (c = getopt(argc, argv, "c:dfh")) != -1 ){
+     while( (c = getopt(argc, argv, "c:dfhM:")) != -1 ){
 	 switch(c){
 	 case 'f':
 	     flag_foreground = 1;
@@ -71,6 +74,10 @@ main(int argc, char **argv){
 	 case 'c':
 	     filename_config = optarg;
 	     break;
+         case 'M':
+             upgradedb = optarg;
+             flag_foreground = 1;
+             break;
 	 case 'h':
 	     usage();
 	     break;
@@ -110,6 +117,16 @@ main(int argc, char **argv){
      if( !config->basedir.empty() && chdir(config->basedir.c_str()) ){
          FATAL("cannot chdir '%s': %s", config->basedir.c_str(), strerror(errno));
      }
+
+     if( upgradedb ){
+         // experimental
+         myself_init();
+         store_init();
+         ring_init();
+         store_upgrade( upgradedb );
+         exit(0);
+     }
+
 #if 1
      // init subsystems
      // ...

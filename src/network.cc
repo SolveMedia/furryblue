@@ -58,6 +58,8 @@ static int report_status(NTD*);
 static int report_peers(NTD*);
 static int report_json(NTD*);
 static int report_load(NTD*);
+static int report_laet(NTD*);
+static int report_rps(NTD*);
 
 extern void install_handler(int, void(*)(int));
 extern int  y2_status(NTD*);
@@ -109,6 +111,8 @@ static struct {
     { "/peers",      report_peers      },
     { "/json",       report_json       },
     { "/loadave",    report_load       },
+    { "/rps",        report_rps        },
+    { "/laet",       report_laet       },
     { "/ring",       report_ring_txt   },
     { "/ring.json",  report_ring_json  },
     // stats
@@ -767,6 +771,16 @@ report_status(NTD *ntd){
 static int
 report_load(NTD *ntd){
     return snprintf(ntd->gpbuf_out, ntd->out_size, "loadave: %f\n", current_load() / 1000.0 );
+}
+
+static int
+report_laet(NTD *ntd){
+    return snprintf(ntd->gpbuf_out, ntd->out_size, "laet: %d\n", (int)(lr_now() - stats.last_ae_time));
+}
+
+static int
+report_rps(NTD *ntd){
+    return snprintf(ntd->gpbuf_out, ntd->out_size, "rps: %f\n", net_req_per_sec);
 }
 
 

@@ -51,5 +51,5 @@ main(int argc, char **argv){
     if( argc > 2 )
         d->set_value( argv[2] );
 
-    make_request( "127.0.0.1", PHMT_Y2_DIST, 5, &req, &res);
+    make_request( "127.0.0.1:4508", PHMT_Y2_DIST, 5, &req, &res);
 }

@@ -37,6 +37,7 @@ struct NetAddr;
 class Database;
 class ACPY2CheckReply;
 class ACPY2CheckValue;
+class ACPY2GetSet;
 
 // changes that need to be applied
 class MerkleChange {
@@ -46,6 +47,7 @@ public:
     int		_treeid;
     int		_level;
     int		_children;
+    bool	_fixme;
     uint8_t    	_hash[MERKLE_HASHLEN];
 };
 
@@ -56,6 +58,7 @@ public:
     int		_count;
     int 	_treeid;
     uint64_t 	_ver;
+    bool	_fixme;
 };
 
 // too speed up AE checks
@@ -79,19 +82,22 @@ public:
     Merkle(Database*);
     void add(const string&, int, int, int64_t);
     void del(const string&, int, int, int64_t);
+    void fix(int, int64_t);
+    void fix(int, int, int64_t);
     int  get(int, int, int64_t, ACPY2CheckReply *);
     void flush(void);
     void check(void);
-    bool ae(int, int, NetAddr*, int*);
-    bool ae_fetch(int, deque<string>*, NetAddr*);
+    bool ae(int, int, NetAddr*, uint64_t*, uint64_t*);
+    bool ae_fetch(int, ACPY2GetSet*, NetAddr*);
     bool compare_result(MerkleCache*, ACPY2CheckValue*);
     bool repartition(int, int64_t*);
+    void upgrade(void);
 private:
-    void q_leafnext(int, uint64_t, int, const string *);
-    bool apply_update_maybe(const MerkleChange*, MerkleChange*);
+    void q_leafnext(int, uint64_t, int, const string *, bool fix=0);
+    bool apply_update_maybe(MerkleChange*, MerkleChange*);
     bool apply_updates(MerkleChangeQ*);
     string *leafcache_get(int, const string&);
-    void leafcache_set(int, int, int64_t, int);
+    void leafcache_set(int, int, int64_t, int, bool fix=0);
     void leafcache_flush(int);
     bool leafcache_maybe_flush(int);
 

@@ -237,8 +237,8 @@ Ring::distrib(int part, ACPY2DistRequest *req){
         for(int i=0; i<p->_dc[0]->_server.size(); i++){
             RP_Server *s = p->_dc[0]->_server[i];
             if( s->bestaddr.is_self() ){ seenme = 1; continue; }
-            if( !s->is_up )   continue;
-            if( s == sender ) continue;
+            if( !s->is_avail ) continue;
+            if( s == sender )  continue;
 
             if( seenme && orderly ){
                 nearby->push_front(s);
@@ -254,8 +254,8 @@ Ring::distrib(int part, ACPY2DistRequest *req){
             int n = random();
             for(int i=0; i<p->_dc[0]->_server.size(); i++){
                 RP_Server *s =  p->_dc[d]->_server[(i + n) % size];
-                if( !s->is_up )   continue;
-                if( s == sender ) continue;
+                if( !s->is_avail ) continue;
+                if( s == sender )  continue;
 
                 faraway->push_back(s);
                 break;
@@ -271,8 +271,8 @@ Ring::distrib(int part, ACPY2DistRequest *req){
         for(int i=0; i<_server.size(); i++){
             RP_Server *s = _server[i];
             if( s->bestaddr.is_self() ){ seenme = 1; continue; }
-            if( !s->is_up )   continue;
-            if( s == sender ) continue;
+            if( !s->is_avail ) continue;
+            if( s == sender )  continue;
 
             if( !s->bestaddr.same_rack && s->bestaddr.same_dc ){
                 // some per other rack
@@ -304,7 +304,7 @@ Ring::distrib(int part, ACPY2DistRequest *req){
                 int n = random();
                 for(int x=0; x<nhere; x++){
                     s = _server[ i + (n+x) % nhere ];
-                    if( !s->is_up ) continue;
+                    if( !s->is_avail ) continue;
                     faraway->push_back(s);
                     break;
                 }

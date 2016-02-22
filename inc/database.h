@@ -62,12 +62,14 @@ public:
     bool ae(void);
     void configure(void);
     int64_t ring_version(void) const;
+    void upgrade(void);
 
     friend class BackendConf;
     friend class Merkle;
     friend class Expire;
     friend class Ring;
     friend class MerkRepartLR;
+    friend class MerkDeleteLR;
 
     DISALLOW_COPY(Database);
 };

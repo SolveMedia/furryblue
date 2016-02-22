@@ -42,6 +42,7 @@ static int cmd_shut(Console *, const char *, int);
 static int cmd_load(Console *, const char *, int);
 static int cmd_reqs(Console *, const char *, int);
 static int cmd_rps(Console *, const char *, int);
+static int cmd_laet(Console *, const char *, int);
 static int cmd_status(Console *, const char *, int);
 static int cmd_help(Console *, const char *, int);
 static int cmd_nohap(Console *, const char *, int);
@@ -72,6 +73,7 @@ static struct {
     { "util",           1, cmd_util },	// utilization
     { "reqs",           1, cmd_reqs },	// number of requests handled
     { "rps", 		1, cmd_rps  },	// requests per second
+    { "laet",		1, cmd_laet },  // last ae time
     { "xyzzy",          0, cmd_nohap },
     { "plugh",          0, cmd_y2 },
     { "look",           0, cmd_look },
@@ -165,6 +167,15 @@ cmd_rps(Console *con, const char *cmd, int len){
     char buf[32];
 
     snprintf(buf, sizeof(buf), "%.4f\n", net_req_per_sec);
+    con->output(buf);
+    return 1;
+}
+
+static int
+cmd_laet(Console *con, const char *cmd, int len){
+    char buf[32];
+
+    snprintf(buf, sizeof(buf), "%d\n", (int)(lr_now() - stats.last_ae_time));
     con->output(buf);
     return 1;
 }

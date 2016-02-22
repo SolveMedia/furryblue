@@ -29,6 +29,7 @@ public:
     string		rack;
     NetAddr		bestaddr;
     bool		is_up;
+    bool		is_avail;
     bool		is_uptodate;
     int64_t		last_conf;
 

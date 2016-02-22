@@ -47,13 +47,13 @@
 // toss + forget, do not wait for a response
 void
 toss_request(int fd, const sockaddr_in *sa, int reqno, google::protobuf::Message *g){
-    NTD ntd(1024, 2048);
+    char *buf;
 
     string gout;
     g->SerializeToString( &gout );
     int gsz = gout.length();
-    ntd.out_resize( sizeof(protocol_header) + gsz );
-    protocol_header *pho = (protocol_header*) ntd.gpbuf_out;
+    buf = (char*)malloc( sizeof(protocol_header) + gsz );
+    protocol_header *pho = (protocol_header*) buf;
 
     pho->version        = PHVERSION;
     pho->type           = reqno;
@@ -65,7 +65,7 @@ toss_request(int fd, const sockaddr_in *sa, int reqno, google::protobuf::Message
 
     cvt_header_to_network( pho );
 
-    memcpy(ntd.out_data(), gout.c_str(), gsz);
+    memcpy(buf + sizeof(protocol_header), gout.c_str(), gsz);
 
     int efd = fd;
     if( fd == 0 ){
@@ -74,8 +74,9 @@ toss_request(int fd, const sockaddr_in *sa, int reqno, google::protobuf::Message
     }
 
     DEBUG("sending udp");
-    sendto(efd, ntd.gpbuf_out, sizeof(protocol_header) + gsz, 0, (sockaddr*)sa, sizeof(sockaddr_in));
+    sendto(efd, buf, sizeof(protocol_header) + gsz, 0, (sockaddr*)sa, sizeof(sockaddr_in));
 
+    free( buf );
     if( fd == 0 ) close(efd );
 }
 

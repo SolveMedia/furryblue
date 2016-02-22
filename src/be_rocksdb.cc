@@ -57,7 +57,18 @@ create_be(DBConf *cf){
 BE_RocksDB::BE_RocksDB(DBConf *cf) : Database(cf) {
 
     rocksdb::Options options;
+
+    // options.statistics = rocksdb::CreateDBStatistics();
+
+    options.write_buffer_size           =  16 * 1024 * 1024;
+    options.target_file_size_base       = 256 * 1024 * 1024;
+    //options.compaction_readahead_size = 2 * 1024 * 1024;
+    options.max_write_buffer_number     = 4;
+    options.target_file_size_multiplier = 10;
+    options.max_background_compactions  = 4;
+
     options.create_if_missing = true;
+
     rocksdb::Status status = rocksdb::DB::Open(options, cf->pathname.c_str(), &_db);
 
     if( !status.ok() ){
@@ -110,6 +121,7 @@ BE_RocksDB::_range(char sub, const string& start, const string& end, LambdaRange
     for (it->Seek(k); it->Valid(); it->Next()) {
 
         rocksdb::Slice kks = it->key();
+
         // check + remove prefix
         if( kks[0] != sub ) break;
         kks.remove_prefix(1);

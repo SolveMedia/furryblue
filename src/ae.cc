@@ -21,6 +21,7 @@
 #include "partition.h"
 #include "database.h"
 #include "stats.h"
+#include "runmode.h"
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -32,8 +33,8 @@
 
 #define TIMEOUT		30
 #define TOONEW		(60 * 1000000)	// 1 minute, microsecs
-#define MAXFETCH	64
-#define BIGLIST		10240
+#define MAXFETCH	256
+#define MAXRESULTS	256
 #define MAXERR		20
 
 
@@ -42,7 +43,8 @@ bool
 Database::ae(void){
     bool ok = 1;
     int npart = _ring->num_parts();
-    int nsync = 0;
+    uint64_t nsync = 0;
+    uint64_t mism  = 0;
 
     DEBUG("ae %s %d", _name.c_str(), npart);
     for(int p=0; p<npart; p++ ){
@@ -51,10 +53,12 @@ Database::ae(void){
         // compare merkle tree with random peer
         RP_Server *s = _ring->random_peer(p);
         if( !s ) continue;
-        int r = _merk->ae(p, treeid, & s->bestaddr, &nsync);
+        int r = _merk->ae(p, treeid, & s->bestaddr, &nsync, &mism);
         if( !r ) ok = 0;
-        VERBOSE("ae %s ok=%d synced=%d", _name.c_str(), r, nsync);
+        VERBOSE("ae %s ok=%d mismatch=%lld synced=%lld", _name.c_str(), r, mism, nsync);
     }
+
+    return ok;
 }
 
 RP_Server *
@@ -135,13 +139,16 @@ highest_level(ACPY2CheckReply &r){
 // RSN - multithread
 
 bool
-Merkle::ae(int part, int treeid, NetAddr *peer, int *nsync){
+Merkle::ae(int part, int treeid, NetAddr *peer, uint64_t *nsync, uint64_t *mism){
     bool ok  = 1;
     int errs = 0;
+    uint64_t mismatch = 0;
+    uint64_t synced   = 0;
     ACPY2CheckRequest req;
     ACPY2CheckReply   res;
+    ACPY2GetSet       getreq;
     deque<ToDo*>      badnode;
-    deque<string>     needkey;
+
     MerkleCache       cache;
     hrtime_t tnew = lr_usec() - TOONEW;
 
@@ -149,18 +156,22 @@ Merkle::ae(int part, int treeid, NetAddr *peer, int *nsync){
 
     req.set_map( _be->_name );
     req.set_treeid( treeid );
-    req.set_maxresult( 256 );
+    req.set_maxresult( MAXRESULTS );
     *nsync = 0;
+    *mism  = 0;
 
     // start at the root
     add_todo( badnode, MERKLE_HEIGHT - MERKLE_BUILD, 0 );
 
     while( !badnode.empty() ){
+        stats.last_ae_time = lr_now();
+        if( runmode.is_stopping() ) return ok;
+
         // process nodes in LIFO order - walks in DFS order, and keeps list small
         // FIFO order => breadth-first => big list
         ToDo *t = badnode.back();
         badnode.pop_back();
-        DEBUG(" check node %02d_%012llX", t->level, t->version);
+        if( t->level < 10 ) DEBUG(" check node %02d_%016llX", t->level, t->version);
         // build request + send to peer
         req.set_level( t->level );
         req.set_version( t->version );
@@ -170,6 +181,8 @@ Merkle::ae(int part, int treeid, NetAddr *peer, int *nsync){
         if( !r ){
             DEBUG(" conversation failed");
             ok = 0;
+            *nsync = synced;
+            *mism  = mismatch;
             if( ++errs > MAXERR ) return 0;
             continue;
         }
@@ -177,7 +190,7 @@ Merkle::ae(int part, int treeid, NetAddr *peer, int *nsync){
         // compare results
         // find highest level result, ignore others
         int highest = highest_level(res);
-        DEBUG("  got %d looking at %d", res.check_size(), highest);
+        // DEBUG("  got %d looking at %d", res.check_size(), highest);
 
         for(int i=0; i<res.check_size(); i++){
             ACPY2CheckValue *c = res.mutable_check(i);
@@ -186,91 +199,95 @@ Merkle::ae(int part, int treeid, NetAddr *peer, int *nsync){
 
             if( c->level() > MERKLE_HEIGHT ){
                 // do we need this key?
-                DEBUG("  node %02d_%012llX", c->level(), c->version());
+                // DEBUG("  node %02d_%016llX", c->level(), c->version());
 
                 int  npart = _be->_ring->partno( c->shard() );
                 bool local = (npart == part) || _be->_ring->is_local(npart);
                 if( !local ) continue;
 
                 if( _be->want_it(c->key(), c->version()) ){
-                    needkey.push_back( c->key() );
-                    DEBUG("   need key %s", c->key().c_str());
+                    synced  ++;
 
-                    if( needkey.size() >= BIGLIST ){
+                    ACPY2MapDatum *d = getreq.add_data();
+                    d->set_map( _be->_name );
+                    d->set_key( c->key() );
+                    d->set_version( c->version() );
+
+                    //DEBUG("   need key %s", c->key().c_str());
+
+                    if( getreq.data_size() >= MAXFETCH ){
                         // process keys
-                        if( ! ae_fetch(part, &needkey, peer) ) ok = 0;
+                        if( ! ae_fetch(part, &getreq, peer) ) ok = 0;
+                    }
+                }else{
+                    // we went this far for a key we don't want,
+                    // make sure it is in the merkle tree
+                    if( req.level() != 0 ){
+                        add( c->key(), treeid, c->shard(), c->version() );
+                        fix( treeid, c->level(), c->version() );
                     }
                 }
             }else{
+
                 // check the hash
                 if( c->isvalid() && !compare_result( &cache, c ) ){
                     // hash mismatch
                     add_todo( badnode, c->level(), c->version() );
-                    DEBUG("  node %02d_%012llX  => ne", c->level(), c->version());
+                    mismatch ++;
+                    // DEBUG("  node %02d_%016llX  => ne", c->level(), c->version());
                 }else{
                     // hash same
-                    DEBUG("  node %02d_%012llX  => OK", c->level(), c->version());
+                    // DEBUG("  node %02d_%016llX  => OK", c->level(), c->version());
                 }
             }
 
             // RSN - also check that our hashes are correct
         }
+
     }
 
-    *nsync = needkey.size();
-    if( ! ae_fetch( part, &needkey, peer ) ) ok = 0;
+    *nsync = synced;
+    *mism  = mismatch;
+    if( ! ae_fetch( part, &getreq, peer ) ) ok = 0;
 
     return ok;
 }
 
+
 bool
-Merkle::ae_fetch(int part, deque<string> *dk, NetAddr *peer){
+Merkle::ae_fetch(int part, ACPY2GetSet *req, NetAddr *peer){
     bool ok  = 1;
     int errs = 0;
-    ACPY2GetSet getreq;
 
-    // fetch missing keys
-    // RSN - multiple threads, multiple peers
-    while( !dk->empty() ){
-        string key = dk->front();
-        dk->pop_front();
+    if( req->data_size() == 0 ) return 1;
 
-        // bundle up a bunch of requests
-        ACPY2MapDatum *d = getreq.add_data();
-        d->set_map( _be->_name );
-        d->set_key( key );
+    int r = make_request(peer, PHMT_Y2_GET, TIMEOUT, req, req);
 
-        if( getreq.data_size() >= MAXFETCH || dk->empty() ){
-            int r = make_request(peer, PHMT_Y2_GET, TIMEOUT, &getreq, &getreq);
-            if( !r ){
-                DEBUG(" conversation failed");
-                // failed - try another server
-                RP_Server *s = _be->_ring->random_peer(part, peer);
-                if( s ){
-                    r = make_request(& s->bestaddr, PHMT_Y2_GET, TIMEOUT, &getreq, &getreq);
-                    if( r ){
-                        // new peer worked, switch
-                        peer = & s->bestaddr;
-                    }
-                }
-                if( !r ){
-                    ok = 0;
-                    if( ++errs > MAXERR ) return 0;	// give up
-                    continue;
-                }
-            }
-            // process results
-            for(int i=0; i<getreq.data_size(); i++){
-                ACPY2MapDatum *r = getreq.mutable_data(i);
-                DEBUG("   put %s", r->key().c_str());
-                _be->put( r, (int*)0);
-                INCSTAT( ae_fetched );
-            }
-
-            getreq.Clear();
-            errs = 0;
+    if( !r ){
+        DEBUG(" conversation failed");
+        // failed - try another server
+        RP_Server *s = _be->_ring->random_peer(part, peer);
+        if( s ){
+            r = make_request(& s->bestaddr, PHMT_Y2_GET, TIMEOUT, req, req);
+        }
+        if( !r ){
+            ok = 0;
         }
     }
 
+    if( ok ){
+        // process results
+        for(int i=0; i<req->data_size(); i++){
+            ACPY2MapDatum *r = req->mutable_data(i);
+            //DEBUG("   put %s", r->key().c_str());
+            _be->put( r, (int*)0);
+            INCSTAT( ae_fetched );
+        }
+    }
+
+
+    req->Clear();
+
     return ok;
 }
+

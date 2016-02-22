@@ -30,10 +30,12 @@
 #include "y2db_check.pb.h"
 
 
+#define TOONEW		(60 * 1000000)	// 1 minute, microsecs
 #define NDBLOCK 1029
 Mutex datalock[NDBLOCK];
 
 
+extern bool db_uptodate;
 extern bool run_program(ACPY2MapDatum *req);
 
 
@@ -84,6 +86,15 @@ Database::get(ACPY2MapDatum *res){
 
     if( res->has_version() && res->version() != dr->ver ){
         DEBUG("ver not found");
+        // someone asked for this particular version, but we do not have.
+        // make sure our merkle is not misreporting
+        if( db_uptodate ){
+            int shard  = shard_hash( res->key() );
+            int part   = _ring->partno( res->shard() );
+            int treeid = _ring->treeid(part);
+            VERBOSE("key/ver not found %016llx %s", res->version(), res->key().c_str());
+            _merk->del( res->key(), treeid, shard, res->version() );
+        }
         return 0;	// wrong version
     }
     if( dr->expire && dr->expire < lr_usec() ){
@@ -277,14 +288,24 @@ Database::del_internal(char sub, const string& key){
     return _del(sub, key);
 }
 
+void
+Database::upgrade(void){
+    _merk->upgrade();
+}
+
 int
 Database::get_merkle(int level, int treeid, int64_t ver, int maxresult, ACPY2CheckReply *res){
 
     int nm = _merk->get(level, treeid, ver, res);
 
+    if( !nm ){
+        // nothing here, but someone was looking.
+        _merk->fix(level, treeid, ver); // check for problem
+        return 0;
+    }
+
     if( !maxresult ) maxresult = 64;
 
-    if( nm == 0 ) return 0;			// nothing here
     if( level == MERKLE_HEIGHT ) return nm;	// nothing else to add
     if( maxresult && nm >= maxresult )
         return nm;
@@ -301,6 +322,23 @@ Database::get_merkle(int level, int treeid, int64_t ver, int maxresult, ACPY2Che
             ACPY2CheckValue *mv = res->mutable_check(cpos);
 
             int nr = _merk->get(cl, treeid, mv->version(), res);
+
+            // sanity check
+            bool fixme = 0;
+            int expected;
+            if( cl < MERKLE_HEIGHT ){
+                expected = mv->children();
+                if( nr > 16 ) fixme = 1;
+            }else{
+                expected = mv->keycount();
+            }
+            if( nr != expected ) fixme = 1;
+
+            if( fixme && db_uptodate && (mv->version() < lr_usec() - TOONEW) ){
+                VERBOSE("how odd. got merkle: nr %d, expected %d [%d %04X %016llX]", nr, expected, cl, treeid, mv->version() );
+                _merk->fix(treeid, cl, mv->version());
+            }
+
             ng += nr;
             if( cl >= MERKLE_HEIGHT - 1 )
                 nextsize += mv->has_keycount() ? mv->keycount() : 1;

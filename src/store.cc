@@ -170,6 +170,13 @@ store_distrib(const char *db, int part, ACPY2DistRequest *req){
     return be->distrib(part, req);
 }
 
+void
+store_upgrade(const char *db){
+    Database *be = find(db);
+    if(!be) return;
+
+    be->upgrade();
+}
 
 //################################################################
 
@@ -178,7 +185,7 @@ store_ae(void){
     bool ok = 1;
 
     for(int i=0; i<ndb; i++){
-        if( dbs[i].be->ae() ) ok = 0;
+        if( ! dbs[i].be->ae() ) ok = 0;
     }
 
     // we are up to date if all databases AEed ok

@@ -22,6 +22,7 @@
 #include "partition.h"
 #include "runmode.h"
 #include "stats.h"
+#include "dbwire.h"
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -104,13 +105,22 @@ Merkle::Merkle(Database* be){
 //################################################################
 
 static bool
-sort_leafrec_compare(const ACPY2MerkleLeafRec &a, const ACPY2MerkleLeafRec &b){
+leafrec_compare(const ACPY2MerkleLeafRec &a, const ACPY2MerkleLeafRec &b){
 
     if( a.version() < b.version() ) return 1;
     if( a.version() > b.version() ) return 0;
     if( a.key()     < b.key()     ) return 1;
     return 0;
 }
+
+static bool
+leafrec_equal(const ACPY2MerkleLeafRec &a, const ACPY2MerkleLeafRec &b){
+
+    if( a.version() != b.version() ) return 0;
+    if( a.key()     != b.key()     ) return 0;
+    return 1;
+}
+
 
 
 // add entry to merkle tree
@@ -124,54 +134,54 @@ Merkle::add(const string& key, int treeid, int shard, int64_t ver){
     ACPY2MerkleLeaf l;
 
     DEBUG("leaf %d %016llX => %s %d", treeid, ver, mkey.c_str(), ln);
-    hrtime_t t0 = hr_usec();
 
     // get leaf node, append, write
     _nlock[ln].lock();
-    hrtime_t t1 = hr_usec();
 
 #ifdef LEAFCACHE
     string *val = leafcache_get(ln, mkey);
-    hrtime_t t2 = hr_usec();
-
     l.ParsePartialFromString( *val );
-    ACPY2MerkleLeafRec *rec = l.add_rec();
-    rec->set_key(     key );
-    rec->set_version( ver );
-    rec->set_shard(   shard );
-    hrtime_t t3 = hr_usec();
-    // keep them in sorted order
-    google::protobuf::RepeatedPtrField<ACPY2MerkleLeafRec> *lc = l.mutable_rec();
-    std::sort( lc->begin(), lc->end(), sort_leafrec_compare );
-    hrtime_t t4 = hr_usec();
-
-    l.SerializeToString( val );
-    leafcache_set(ln, treeid, ver, l.rec_size() );
-    hrtime_t t5 = hr_usec();
-
 #else
     string val;
     _be->_get('m', mkey, &val);
     l.ParsePartialFromString(val);
-    ACPY2MerkleLeafRec *rec = l.add_rec();
-    rec->set_key(     key );
-    rec->set_version( ver );
-    rec->set_shard(   shard );
-    // keep them in sorted order
-    google::protobuf::RepeatedPtrField<ACPY2MerkleLeafRec> *lc = l.mutable_rec();
-    std::sort( lc->begin(), lc->end(), sort_leafrec_compare );
+#endif
 
+    // check not already in
+    int i;
+    bool found=0;
+    for(i=0; i<l.rec_size(); i++){
+        ACPY2MerkleLeafRec *rec = l.mutable_rec(i);
+        if( rec->version() == ver && rec->key() == key ){
+            found = 1;
+            break;
+        }
+    }
+
+    if( !found ){
+        ACPY2MerkleLeafRec *rec = l.add_rec();
+        rec->set_key(     key );
+        rec->set_version( ver );
+        rec->set_shard(   shard );
+        // keep them in sorted order
+        if( l.rec_size() > 1 ){
+            google::protobuf::RepeatedPtrField<ACPY2MerkleLeafRec> *lc = l.mutable_rec();
+            std::sort( lc->begin(), lc->end(), leafrec_compare );
+        }
+    }
+
+#ifdef LEAFCACHE
+    l.SerializeToString( val );
+    leafcache_set(ln, treeid, ver, l.rec_size() );
+#else
     l.SerializeToString( &val );
     _be->_put('m', mkey, val);
     // queue higher nodes
     q_leafnext( treeid, ver, l.rec_size(), &val );
-
 #endif
-    hrtime_t t6 = hr_usec();
+
 
     _nlock[ln].unlock();
-
-    // VERBOSE("merk/timing: %d %d %d %d %d %d", (int)(t1-t0), (int)(t2-t1), (int)(t3-t2), (int)(t4-t3), (int)(t5-t4), (int)(t6-t5));
 
 }
 
@@ -245,6 +255,83 @@ Merkle::del(const string& key, int treeid, int shard, int64_t ver){
     _nlock[ln].unlock();
 }
 
+// same as del, with checks + cleaning
+void
+Merkle::fix(int treeid, int64_t ver){
+
+    string mkey;
+    merkle_key(MERKLE_HEIGHT, treeid, ver, &mkey);
+    int ln = merkle_lock_number(MERKLE_HEIGHT, treeid, ver);
+
+    string *val;
+    ACPY2MerkleLeaf l;
+
+    DEBUG("leaf %016llX => %s", ver, mkey.c_str());
+
+    // get leaf node, del, write
+    _nlock[ln].lock();
+
+#ifdef LEAFCACHE
+    val = leafcache_get(ln, mkey);
+
+#else
+    string sval;
+    val = &sval;
+
+    _be->_get('m', mkey, val);
+#endif
+
+    l.ParsePartialFromString(*val);
+    int oldsize = l.rec_size();
+
+    if( oldsize > 1 ){
+        // sort
+        google::protobuf::RepeatedPtrField<ACPY2MerkleLeafRec> *lc = l.mutable_rec();
+        std::sort( lc->begin(), lc->end(), leafrec_compare );
+
+        // dupes?
+        int keep = 1;
+        for(int i=1; i<l.rec_size(); i++){
+            ACPY2MerkleLeafRec *prev = l.mutable_rec(i-1);
+            ACPY2MerkleLeafRec *rec  = l.mutable_rec(i);
+
+            if( rec->version() == prev->version() && rec->key() == prev->key() ){
+                // delete elem
+            }else{
+                if( keep < i ){
+                    l.mutable_rec()->SwapElements(i, keep);
+                }
+                ++keep;
+            }
+        }
+        l.mutable_rec()->DeleteSubrange(keep, l.rec_size() - keep);
+    }
+
+    int newsize = l.rec_size();
+
+    if( l.rec_size() ){
+        l.SerializeToString( val );
+    }else{
+        val->clear();
+    }
+
+#ifdef LEAFCACHE
+    leafcache_set(ln, treeid, ver, l.rec_size(), 1 );
+#else
+    if( ! val->empty() ){
+        _be->_put('m', mkey, *val);
+    }else{
+        _be->_del('m', mkey);
+    }
+    // queue higher nodes
+    q_leafnext( treeid, ver, l.rec_size(), val, 1 );
+#endif
+
+    _nlock[ln].unlock();
+
+    DEBUG(" changed %d -> %d", oldsize, newsize);
+}
+
 string *
 Merkle::leafcache_get(int ln, const string& mkey){
 
@@ -259,7 +346,8 @@ Merkle::leafcache_get(int ln, const string& mkey){
         leafcache_flush(ln);
 
     // fetch
-    c->_mkey = mkey;
+    c->_mkey  = mkey;
+    c->_fixme = 0;
     _be->_get('m', mkey, & c->_data);
 
     merkle_safe_to_stop = 0;
@@ -267,13 +355,15 @@ Merkle::leafcache_get(int ln, const string& mkey){
 }
 
 void
-Merkle::leafcache_set(int ln, int treeid, int64_t ver, int count){
+Merkle::leafcache_set(int ln, int treeid, int64_t ver, int count, bool fixme){
 
     MerkleLeafCache *c = & _cache[ln];
 
     c->_treeid = treeid;
     c->_count  = count;
     c->_ver    = ver;
+
+    if( fixme ) c->_fixme = 1;
 }
 
 void
@@ -289,8 +379,9 @@ Merkle::leafcache_flush(int ln){
         _be->_put('m', c->_mkey, c->_data);
 
     // add leaf
-    q_leafnext( c->_treeid, c->_ver, c->_count, & c->_data );
+    q_leafnext( c->_treeid, c->_ver, c->_count, & c->_data, c->_fixme );
 
+    c->_fixme = 0;
     c->_data.clear();
     c->_mkey.clear();
 
@@ -312,9 +403,14 @@ Merkle::leafcache_maybe_flush(int ln){
 
 
 void
-Merkle::q_leafnext(int treeid, uint64_t ver, int keycount, const string *rec){
+Merkle::q_leafnext(int treeid, uint64_t ver, int keycount, const string *rec, bool fix){
+
+    merkle_safe_to_stop = 0;
 
     MerkleChange * no = new MerkleChange;
+
+    if( !keycount && rec->size() || keycount && !rec->size() )
+        PROBLEM("leafnext confusion count %d, size %d", keycount, rec->size());
 
     if( rec->size() )
         md5_bin( (uchar*) rec->data(), rec->size(), (char*) no->_hash, MERKLE_HASHLEN );
@@ -324,35 +420,112 @@ Merkle::q_leafnext(int treeid, uint64_t ver, int keycount, const string *rec){
     no->_level    = MERKLE_HEIGHT;
     no->_ver	  = merkle_level_version(MERKLE_HEIGHT, ver);
     no->_treeid   = treeid;
-    no->_children = keycount;
+    no->_children = 1;
     no->_keycount = keycount;
+    no->_fixme    = fix;
 
     char buf[64];
     hex_encode( no->_hash, MERKLE_HASHLEN, buf, sizeof(buf));
     DEBUG("qln %d_%012llX %d, %d [%s]", no->_level, no->_ver, keycount, rec->size(), buf);
 
-#if 0
-    // if the road looks clear, try to update the next node as well, and queue the node after that
-    // otherwise, queue the next node
-    // this can help at low to medium loads
-    if( apply_update_maybe(no, no) ){
-        _lock.lock();
-        _mnm->push_back(no);
-        _lock.unlock();
-    }
-#else
+
     _lock.lock();
     _mnm->push_back(no);
     _lock.unlock();
-#endif
 
-    merkle_safe_to_stop = 0;
+}
+
+static bool
+sort_node_compare(const MerkleNode &a, const MerkleNode &b){
+    if( a.slot < b.slot ) return 1;
+    return 0;
+}
+
+static bool
+clean_fix_merkle_node(string *val){
+
+    MerkleNode *mn = (MerkleNode*) val->data();
+    int nn = val->size() / sizeof(MerkleNode);
+
+    bool changed  = 0;
+    bool unsorted = 0;
+    int i, j;
+
+    for(i=0; i<nn; i++){
+        if( !mn[i].children || !mn[i].keycount ){
+            // remove empty
+            memmove( mn+i, mn+i+1, sizeof(MerkleNode) );
+            val->resize( (nn-1) * sizeof(MerkleNode) );
+            nn --;
+            i --;
+            changed = 1;
+            continue;
+        }
+
+        for(j=i+1; j<nn; j++){
+            if( mn[i].slot > mn[j].slot ) unsorted = 1;
+            if( mn[i].slot == mn[j].slot ){
+                // remove dupe
+                memmove( mn+j, mn+j+1, sizeof(MerkleNode) );
+                val->resize( (nn-1) * sizeof(MerkleNode) );
+                nn --;
+                changed = 1;
+            }
+        }
+    }
+    if( unsorted ){
+        std::sort( mn, mn + nn, sort_node_compare );
+        changed = 1;
+    }
+
+    return changed;
+}
+
+void
+Merkle::fix(int treeid, int level, int64_t ver){
+    // get node, check, and fix
+
+    treeid &= 0xFFFF;
+
+    if( level == MERKLE_HEIGHT ){
+        fix( treeid, ver );
+        return ;
+    }
+
+    return ;
+
+    // climb down and find a leaf, fix it
+    string mkey, val;
+
+    while( level != MERKLE_HEIGHT ){
+        merkle_key(level, treeid, ver, &mkey);
+        int ln = merkle_lock_number(level, treeid, ver);
+        _nlock[ln].lock();
+        _be->_get('m', mkey, &val);
+        _nlock[ln].unlock();
+
+        // pick next node to fetch
+
+        if( val.empty() ) return;
+
+        MerkleNode *mn = (MerkleNode*) val.data();
+        int nn = val.size() / sizeof(MerkleNode);
+        int i  = random_n(nn);
+
+        uint64_t mask = F16 << ((MERKLE_HEIGHT - level + 4) << 2);
+        uint64_t nver = ver & mask;
+        int slshift = (MERKLE_HEIGHT - level + 3) << 2;
+        ver = nver | ((int64_t)mn[i].slot << slshift);
+        level ++;
+    }
+
+    fix( treeid, ver );
 
 }
 
 // update on disk data with new info
 static bool
-update_node(const MerkleChange *no, string *val){
+update_node(MerkleChange *no, string *val){
 
     bool changed = 0;
 
@@ -361,21 +534,47 @@ update_node(const MerkleChange *no, string *val){
 
     MerkleNode *mn = (MerkleNode*) val->data();
     int nn = val->size() / sizeof(MerkleNode);
-    int i=0;
+    int i=0, j;
 
-    // search
-    for(i=0; i<nn; i++){
-        if( mn[i].slot == slot ) break;
+    if( nn > 16 ) no->_fixme = 1;
+
+    if( !no->_fixme ){
+        // search
+        for(i=0; i<nn; i++){
+            if( mn[i].slot == slot ) break;
+        }
+
+        // quick check for dupe
+        for(j=i+1; j<nn; j++){
+            if( mn[j].slot == slot ) no->_fixme = 1;
+        }
+    }
+
+    if( no->_fixme ){
+        // check for dupes, unsorted
+        changed = clean_fix_merkle_node( val );
+
+        nn = val->size() / sizeof(MerkleNode);
+
+        // re-search
+        for(i=0; i<nn; i++){
+            if( mn[i].slot == slot ) break;
+        }
     }
 
     if( no->_children ){
+        bool resort = 0;
         // not found? append
         if( i == nn ){
             val->resize( (i+1) * sizeof(MerkleNode) );
             mn = (MerkleNode*) val->data();
+            nn ++;
             changed = 1;
+            resort  = 1;
         }else{
             if( memcmp(no->_hash, mn[i].hash, MERKLE_HASHLEN) ) changed = 1;
+            if( no->_keycount != mn[i].keycount ) changed = 1;
+            if( no->_children != mn[i].children ) changed = 1;
         }
 
         // update
@@ -383,6 +582,10 @@ update_node(const MerkleChange *no, string *val){
         mn[i].children = no->_children;
         mn[i].keycount = no->_keycount;
         memcpy(mn[i].hash, no->_hash, MERKLE_HASHLEN);
+
+        if( resort )
+            std::sort( mn, mn + nn, sort_node_compare );
+
     }else{
         // remove empty entry
         if( i != nn ){
@@ -393,7 +596,8 @@ update_node(const MerkleChange *no, string *val){
         }
     }
 
-    if( changed ) DEBUG("  slot %d ch %d", slot, no->_children);
+    if( changed ) DEBUG("  changed node %d_%016llX slot %d ch %d kc %d", no->_level, no->_ver, slot, no->_children, no->_keycount);
+    if( no->_fixme && changed ) VERBOSE("  fixed merkle node %d_%016llX", no->_level, no->_ver);
 
     return changed;
 }
@@ -428,38 +632,6 @@ aggr_nodes(int level, int treeid, uint64_t ver, const string *val, MerkleChange 
     DEBUG("\t[%s]", buf );
 }
 
-// if the lock is available, apply update
-//  it is safe to pass in the same note as in+out
-bool
-Merkle::apply_update_maybe(const MerkleChange *no, MerkleChange *res){
-
-    // change is inserted into parent of node that changed
-    int level = no->_level - 1;
-    if( level < MERKLE_HEIGHT - MERKLE_BUILD ) return 0;
-
-    string mkey;
-    merkle_key(level, no->_treeid, no->_ver, &mkey);
-    int ln = merkle_lock_number(level, no->_treeid, no->_ver);
-    DEBUG("node %s", mkey.c_str());
-
-    string val;
-    // try to get lock.
-    if( _nlock[ln].trylock() ) return 1;
-
-    _be->_get('m', mkey, &val);
-    bool changed = update_node(no, &val);
-    if( changed ){
-        // insert
-        _be->_put('m', mkey, val);
-    }
-    _nlock[ln].unlock();
-
-    if( !changed ) return 0;
-
-    aggr_nodes(level, no->_treeid, no->_ver, &val, res);
-
-    return changed;
-}
 
 // process one clump of notes
 // add result back to list
@@ -487,6 +659,7 @@ Merkle::apply_updates(MerkleChangeQ *l){
     _nlock[ln].lock();
     _be->_get('m', mkey, &val);
     bool changed = update_node(no, &val);
+    bool fixme   = no->_fixme;
 
     int64_t aver = merkle_level_version(level, no->_ver);
 
@@ -501,8 +674,10 @@ Merkle::apply_updates(MerkleChangeQ *l){
         l->pop_front();
 
         // update
+        DEBUG("+node %s", mkey.c_str());
         bool c = update_node(nx, &val);
         if(c) changed = 1;
+        if( nx->_fixme ) fixme = 1;
         delete nx;
     }
 
@@ -512,12 +687,13 @@ Merkle::apply_updates(MerkleChangeQ *l){
     }
     _nlock[ln].unlock();
 
-    if( !changed ){
+    if( !changed && !fixme ){
         delete no;
         return 0;
     }
 
     aggr_nodes(level, no->_treeid, no->_ver, &val, no);
+    no->_fixme = fixme;
     // as long as list started sorted, it will still be sorted after appending
     l->push_back(no);
 
@@ -538,16 +714,19 @@ void
 Merkle::flush(void){
 
     // flush leaf cache
+    bool leavesflushed = 1;
+
 #ifdef LEAFCACHE
     for(int i=0; i<MERKLE_NLOCK; i++){
-        leafcache_maybe_flush(i);
+        bool r = leafcache_maybe_flush(i);
+        if( !r ) leavesflushed = 0;
     }
 #endif
 
     _lock.lock();
     MerkleChangeQ *mnm = _mnm;
     if( mnm->empty() ){
-        merkle_safe_to_stop = 1;
+        if( leavesflushed ) merkle_safe_to_stop = 1;
         _lock.unlock();
         return;
     }
@@ -628,7 +807,7 @@ Merkle::get(int level, int treeid, int64_t ver, ACPY2CheckReply *res){
 
     string val;
     _be->_get('m', mkey, &val);
-    DEBUG("mget %s [%d]", mkey.c_str(), val.size());
+    // DEBUG("mget %s [%d]", mkey.c_str(), val.size());
     if( val.empty() ) return 0;
 
     if( level == MERKLE_HEIGHT ){
@@ -671,19 +850,95 @@ Merkle::compare_result(MerkleCache *cache, ACPY2CheckValue *r){
         if( slot == mn[i].slot ){
             const unsigned char *rh = (unsigned char *)r->hash().data();
             int res = memcmp(rh, mn[i].hash, MERKLE_HASHLEN);
-            DEBUG("hash %02X/%04X/%012llX %02X%02X %s %02X%02X",
-                  level, r->treeid(), r->version(),
-                  mn[i].hash[0], mn[i].hash[1],
-                  (res? "!=" : "=="),
-                  rh[0], rh[1]);
+            //DEBUG("hash %02X/%04X/%012llX %02X%02X %s %02X%02X",
+            //      level, r->treeid(), r->version(),
+            //      mn[i].hash[0], mn[i].hash[1],
+            //      (res? "!=" : "=="),
+            //      rh[0], rh[1]);
             return !res;
         }
     }
 
     // slot not found
-    DEBUG("slot %d not found", slot);
+    // DEBUG("slot %d not found", slot);
     return 0;
 }
+
+//################################################################
+
+class MerkDeleteLR : public LambdaRange {
+public:
+    Database	*be;
+    Ring	*ring;
+    Merkle	*merk;
+    uint64_t	count;
+public:
+    MerkDeleteLR(Database *b, Ring *r, Merkle *m) { be = b; ring = r; merk = m; count = 0; }
+    virtual bool call(const string &, const string &);
+};
+
+bool
+MerkDeleteLR::call(const string &key, const string &val) {
+    be->_del('m', key);
+    count ++;
+    return 1;
+}
+
+
+
+class MerkUpgradeLR : public LambdaRange {
+public:
+    Database	*be;
+    Ring	*ring;
+    Merkle	*merk;
+    uint64_t	count;
+public:
+    MerkUpgradeLR(Database *b, Ring *r, Merkle *m) { be = b; ring = r; merk = m; count = 0; }
+    virtual bool call(const string&, const string&);
+};
+
+bool
+MerkUpgradeLR::call(const string& key, const string& val){
+    // val is DBRecord
+    DBRecord *dr = (DBRecord*) val.data();
+
+    int part   = ring->partno( dr->shard );
+    int treeid = ring->treeid(part);
+
+    merk->add( key, treeid, dr->shard, dr->ver );
+    DEBUG("add key %s", key.c_str());
+    count ++;
+
+    if( count % 10000 == 0 ){
+        merk->flush();
+        VERBOSE("upgrading merkle tree");
+    }
+
+    return 1;
+}
+
+// XXX - does not work? range seems to lose things
+void
+Merkle::upgrade(void){
+    string start, end = "\xFF\xFF";
+
+    VERBOSE("upgrading merkle tree");
+
+    // delete current merkle tree
+    MerkDeleteLR delf(_be, _be->_ring, _be->_merk);
+    _be->_range('m', start, end, &delf);
+    VERBOSE("removed %lld nodes", delf.count);
+
+    // fetch all keys and rebuild
+    VERBOSE("rebuilding merkle tree");
+    MerkUpgradeLR upgf(_be, _be->_ring, _be->_merk);
+    _be->_range('d', start, end, &upgf);
+    runmode.shutdown();
+    _be->_merk->flush();
+    VERBOSE("added %lld keys", upgf.count);
+    VERBOSE("upgrade complete");
+}
+
 
 //################################################################
 

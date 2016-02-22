@@ -21,6 +21,7 @@ struct Stats {
     int64_t	distrib_errs;
     int64_t	distrib_seen;
 
+    lrtime_t	last_ae_time;
 };
 
 extern Stats stats;

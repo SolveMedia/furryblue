@@ -19,5 +19,6 @@ extern int store_get_internal(const char *db, char sub, const string& key, strin
 extern int store_set_internal(const char *db, char sub, const string& key, int len, uchar *data);
 extern int store_get_merkle(const char *db, int level, int shard, int64_t ver, int max, ACPY2CheckReply *res);
 extern int store_distrib(const char *db, int, ACPY2DistRequest *req);
+extern void store_upgrade(const char *db);
 
 #endif /* __fbdb_store_h_ */
