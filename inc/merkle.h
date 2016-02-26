@@ -39,6 +39,8 @@ class ACPY2CheckReply;
 class ACPY2CheckValue;
 class ACPY2GetSet;
 
+class Tinfo;
+
 // changes that need to be applied
 class MerkleChange {
 public:
@@ -89,6 +91,7 @@ public:
     void check(void);
     bool ae(int, int, NetAddr*, uint64_t*, uint64_t*);
     bool ae_fetch(int, ACPY2GetSet*, NetAddr*);
+    void ae_work(Tinfo*);
     bool compare_result(MerkleCache*, ACPY2CheckValue*);
     bool repartition(int, int64_t*);
     void upgrade(void);

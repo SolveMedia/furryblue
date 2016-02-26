@@ -22,11 +22,13 @@
 #include "database.h"
 #include "stats.h"
 #include "runmode.h"
+#include "thread.h"
 
 #include <ctype.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "y2db_getset.pb.h"
 #include "y2db_check.pb.h"
@@ -36,6 +38,7 @@
 #define MAXFETCH	256
 #define MAXRESULTS	256
 #define MAXERR		20
+#define MAXTHREAD	10
 
 
 // this gets run periodically via store_maint()
@@ -111,19 +114,77 @@ Ring::random_peer(int part, const NetAddr *butnot){
     return best;
 }
 
+/****************************************************************/
+
 
 struct ToDo {
-    int64_t	version;
+    uint64_t	version;
     int		level;
 };
 
-static void
-add_todo(deque<ToDo*> &dq, int l, int64_t v){
+class BadNode {
+    bool         emptyp;;
+    deque<ToDo*> dq;
+    Mutex	 lock;
+public:
+    void add(int level, uint64_t ver);
+    bool empty(void);
+    ToDo *pop(void);
+};
+
+bool
+BadNode::empty(void){
+
+    return emptyp;
+}
+
+void
+BadNode::add(int l, uint64_t v){
+
+    lock.lock();
+
     ToDo *t = new ToDo;
     t->level   = l;
     t->version = v;
     dq.push_back(t);
+    emptyp = 0;
+
+    lock.unlock();
 }
+
+ToDo*
+BadNode::pop(void){
+    ToDo *t = 0;
+
+    // process nodes in LIFO order - walks in DFS order, and keeps list small
+    // FIFO order => breadth-first => big list
+
+    lock.lock();
+    if( dq.empty() ){
+        emptyp = 1;
+    }else{
+        t = dq.back();
+        dq.pop_back();
+    }
+    lock.unlock();
+    return t;
+}
+
+class Tinfo {
+public:
+    Merkle  *mk;
+    BadNode *bn;
+    NetAddr *peer;
+    int      part;
+    int      treeid;
+    bool     ok;
+    bool     active;
+    int64_t  mismatch;
+    int64_t  nsynced;
+
+    Tinfo(){ ok = 1; active = 0; mismatch = 0; nsynced = 0; mk = 0; bn = 0;}
+};
+
 
 static int
 highest_level(ACPY2CheckReply &r){
@@ -136,54 +197,52 @@ highest_level(ACPY2CheckReply &r){
     return h;
 }
 
-// RSN - multithread
+void
+ae_work_start( Tinfo *ti ){
+    ti->mk->ae_work( ti );
+}
 
-bool
-Merkle::ae(int part, int treeid, NetAddr *peer, uint64_t *nsync, uint64_t *mism){
-    bool ok  = 1;
-    int errs = 0;
-    uint64_t mismatch = 0;
-    uint64_t synced   = 0;
-    ACPY2CheckRequest req;
-    ACPY2CheckReply   res;
-    ACPY2GetSet       getreq;
-    deque<ToDo*>      badnode;
+/****************************************************************/
 
-    MerkleCache       cache;
-    hrtime_t tnew = lr_usec() - TOONEW;
+void
+Merkle::ae_work(Tinfo *ti){
+    ACPY2CheckRequest  req;
+    ACPY2CheckReply    res;
+    ACPY2GetSet        getreq;
+    MerkleCache        cache;
+    BadNode           *badnode = ti->bn;
+    hrtime_t           tnew    = lr_usec() - TOONEW;
+    int                errs    = 0;
 
-    DEBUG("AE check %s[%d](%d) with %s", _be->_name.c_str(), part, treeid, peer->name.c_str());
-
+    ti->active = 1;
     req.set_map( _be->_name );
-    req.set_treeid( treeid );
+    req.set_treeid( ti->treeid );
     req.set_maxresult( MAXRESULTS );
-    *nsync = 0;
-    *mism  = 0;
 
-    // start at the root
-    add_todo( badnode, MERKLE_HEIGHT - MERKLE_BUILD, 0 );
 
-    while( !badnode.empty() ){
+    while( 1 ){
         stats.last_ae_time = lr_now();
-        if( runmode.is_stopping() ) return ok;
+        if( runmode.is_stopping() ) break;
 
-        // process nodes in LIFO order - walks in DFS order, and keeps list small
-        // FIFO order => breadth-first => big list
-        ToDo *t = badnode.back();
-        badnode.pop_back();
-        if( t->level < 10 ) DEBUG(" check node %02d_%016llX", t->level, t->version);
+        ToDo *t = badnode->pop();
+        if( !t ){
+            sleep(5);
+            t = badnode->pop();
+        }
+        if( !t ) break;
+
+        if( t->level < 11 ) DEBUG(" check node %02d_%016llX", t->level, t->version);
         // build request + send to peer
-        req.set_level( t->level );
+        req.set_level(   t->level );
         req.set_version( t->version );
         delete t;
 
-        int r = make_request(peer, PHMT_Y2_CHECK, TIMEOUT, &req, &res);
+        int r = make_request(ti->peer, PHMT_Y2_CHECK, TIMEOUT, &req, &res);
         if( !r ){
             DEBUG(" conversation failed");
-            ok = 0;
-            *nsync = synced;
-            *mism  = mismatch;
-            if( ++errs > MAXERR ) return 0;
+            ti->ok = 0;
+
+            if( ++errs > MAXERR ) break;
             continue;
         }
         errs = 0;
@@ -202,11 +261,11 @@ Merkle::ae(int part, int treeid, NetAddr *peer, uint64_t *nsync, uint64_t *mism)
                 // DEBUG("  node %02d_%016llX", c->level(), c->version());
 
                 int  npart = _be->_ring->partno( c->shard() );
-                bool local = (npart == part) || _be->_ring->is_local(npart);
+                bool local = (npart == ti->part) || _be->_ring->is_local(npart);
                 if( !local ) continue;
 
                 if( _be->want_it(c->key(), c->version()) ){
-                    synced  ++;
+                    ti->nsynced  ++;
 
                     ACPY2MapDatum *d = getreq.add_data();
                     d->set_map( _be->_name );
@@ -217,14 +276,14 @@ Merkle::ae(int part, int treeid, NetAddr *peer, uint64_t *nsync, uint64_t *mism)
 
                     if( getreq.data_size() >= MAXFETCH ){
                         // process keys
-                        if( ! ae_fetch(part, &getreq, peer) ) ok = 0;
+                        if( ! ae_fetch(ti->part, &getreq, ti->peer) ) ti->ok = 0;
                     }
                 }else{
                     // we went this far for a key we don't want,
                     // make sure it is in the merkle tree
                     if( req.level() != 0 ){
-                        add( c->key(), treeid, c->shard(), c->version() );
-                        fix( treeid, c->level(), c->version() );
+                        add( c->key(), ti->treeid, c->shard(), c->version() );
+                        fix( ti->treeid, c->level(), c->version() );
                     }
                 }
             }else{
@@ -232,24 +291,84 @@ Merkle::ae(int part, int treeid, NetAddr *peer, uint64_t *nsync, uint64_t *mism)
                 // check the hash
                 if( c->isvalid() && !compare_result( &cache, c ) ){
                     // hash mismatch
-                    add_todo( badnode, c->level(), c->version() );
-                    mismatch ++;
+                    badnode->add( c->level(), c->version() );
+                    ti->mismatch ++;
                     // DEBUG("  node %02d_%016llX  => ne", c->level(), c->version());
                 }else{
                     // hash same
                     // DEBUG("  node %02d_%016llX  => OK", c->level(), c->version());
                 }
             }
-
-            // RSN - also check that our hashes are correct
         }
-
     }
 
-    *nsync = synced;
-    *mism  = mismatch;
-    if( ! ae_fetch( part, &getreq, peer ) ) ok = 0;
+    if( ! ae_fetch( ti->part, &getreq, ti->peer ) ) ti->ok = 0;
+    ti->active = 0;
+}
 
+
+bool
+Merkle::ae(int part, int treeid, NetAddr *peer, uint64_t *nsync, uint64_t *mism){
+    bool    ok       = 1;
+    int64_t mismatch = 0;
+    int64_t synced   = 0;
+    Tinfo   ti[MAXTHREAD];
+    BadNode badnode;
+
+    DEBUG("AE check %s[%d](%d) with %s", _be->_name.c_str(), part, treeid, peer->name.c_str());
+
+    *nsync = 0;
+    *mism  = 0;
+
+    // init helper thread info
+    for(int i=0; i<MAXTHREAD; i++){
+        ti[i].mk     = this;
+        ti[i].bn     = &badnode;
+        ti[i].peer   = peer;
+        ti[i].treeid = treeid;
+        ti[i].part   = part;
+    }
+
+    // start at the root
+    badnode.add( MERKLE_HEIGHT - MERKLE_BUILD, 0 );
+
+    // start/restart threads
+    // start one thread, wait. if still work to do, start another, wait, etc.
+    while(1){
+        if( runmode.is_stopping() ) break;
+        if( badnode.empty() )       break;
+
+        for(int i=0; i<MAXTHREAD; i++){
+            if( runmode.is_stopping() ) break;
+            if( badnode.empty() )       break;
+            if( ti[i].active )          continue;
+
+            DEBUG("starting ae thread");
+            start_thread( (void* (*)(void*))ae_work_start, (void*)(ti + i), 0 );
+
+            // exponentially increase delay before starting more
+            int d = (1<<i) * 30;
+            if( d < 60 )  d = 60;
+            if( d > 600 ) d = 600;
+            for(int j=0; j<d; j++){
+                sleep(1);
+                if( runmode.is_stopping() ) break;
+                if( badnode.empty() )       break;
+
+            }
+        }
+    }
+
+    // wait until all threads done
+    for(int i=0; i<MAXTHREAD; i++){
+        while( ti[i].active ) sleep(1);
+        mismatch += ti[i].mismatch;
+        synced   += ti[i].nsynced;
+        if( ! ti[i].ok ) ok = 0;
+    }
+
+    *mism  = mismatch;
+    *nsync = synced;
     return ok;
 }
 

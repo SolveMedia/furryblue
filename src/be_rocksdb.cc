@@ -64,7 +64,7 @@ BE_RocksDB::BE_RocksDB(DBConf *cf) : Database(cf) {
     options.target_file_size_base       = 256 * 1024 * 1024;
     //options.compaction_readahead_size = 2 * 1024 * 1024;
     options.max_write_buffer_number     = 4;
-    options.target_file_size_multiplier = 10;
+    options.target_file_size_multiplier = 4;
     options.max_background_compactions  = 4;
 
     options.create_if_missing = true;
