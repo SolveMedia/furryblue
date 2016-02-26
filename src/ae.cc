@@ -36,7 +36,7 @@
 #define TIMEOUT		30
 #define TOONEW		(60 * 1000000)	// 1 minute, microsecs
 #define MAXFETCH	256
-#define MAXRESULTS	256
+#define MAXRESULTS	1024
 #define MAXERR		20
 #define MAXTHREAD	10
 
