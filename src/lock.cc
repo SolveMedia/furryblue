@@ -29,7 +29,7 @@ public:
 
 Mutex_Attr::Mutex_Attr() {
     pthread_mutexattr_init( &attr );
-    pthread_mutexattr_settype( &attr, PTHREAD_MUTEX_NORMAL );
+    pthread_mutexattr_settype( &attr, PTHREAD_MUTEX_ERRORCHECK );
 }
 
 static Mutex_Attr *default_mutex_attr = 0;
@@ -40,6 +40,7 @@ Mutex::Mutex(){
     if( ! default_mutex_attr ){
         default_mutex_attr = new Mutex_Attr;
     }
+
     pthread_mutex_init( &_mutex, &default_mutex_attr->attr );
 }
 
@@ -51,12 +52,14 @@ Mutex::~Mutex(){
 
 void
 Mutex::lock(void){
-    pthread_mutex_lock( &_mutex );
+    int e = pthread_mutex_lock( &_mutex );
+    if(e) FATAL("mutex lock failed %d", e);
 }
 
 void
 Mutex::unlock(void){
-    pthread_mutex_unlock( &_mutex );
+    int e = pthread_mutex_unlock( &_mutex );
+    if(e) FATAL("mutex unlock failed %d", e);
 }
 
 int
