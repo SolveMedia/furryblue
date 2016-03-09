@@ -56,6 +56,7 @@ public:
     int			tcp_threads;
     int			udp_threads;
     int			cio_threads;
+    int			ae_threads;
 
     int 		port_console;
     int 		port_server;

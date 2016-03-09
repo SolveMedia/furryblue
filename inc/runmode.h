@@ -63,6 +63,7 @@ public:
     volatile int final_exit_value() { return _final_exit_value; }
     volatile int winddown_until() { return _winddown_until; }
     volatile int is_stopping() { return _run_mode != RUN_LOLA_RUN; }
+    volatile int is_exiting()  { return _run_mode == RUN_MODE_EXITING; }
 };
 
 extern RunMode runmode;

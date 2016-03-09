@@ -29,6 +29,7 @@ public:
 #define DBPUTST_OLD	2	// expired, ...
 #define DBPUTST_NOTME 	3	// wrong server
 #define DBPUTST_HAVE	4	// already have this
+#define DBPUTST_WANT	DBPUTST_DONE
 
 class Database {
 protected:
@@ -51,7 +52,7 @@ public:
 
     int  get(ACPY2MapDatum *res);
     int  put(ACPY2MapDatum *req, int*);
-    bool want_it(const string&, int64_t);
+    int  want_it(const string&, int64_t);
     int  remove(const string&, int64_t);
     int  expire(int64_t max);
     int  get_internal(char, const string& key, string *res);

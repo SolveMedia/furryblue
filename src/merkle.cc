@@ -133,10 +133,11 @@ Merkle::add(const string& key, int treeid, int shard, int64_t ver){
 
     ACPY2MerkleLeaf l;
 
-    DEBUG("leaf %d %016llX => %s %d", treeid, ver, mkey.c_str(), ln);
+    DEBUG("leaf %d %016llX => %s lock %d", treeid, ver, mkey.c_str(), ln);
 
     // get leaf node, append, write
     _nlock[ln].lock();
+    DEBUG("lock %d %s", ln, mkey.c_str());
 
 #ifdef LEAFCACHE
     string *val = leafcache_get(ln, mkey);
@@ -156,6 +157,10 @@ Merkle::add(const string& key, int treeid, int shard, int64_t ver){
             found = 1;
             break;
         }
+
+        // XXX
+        if( merkle_level_version(MERKLE_HEIGHT, ver) != merkle_level_version(MERKLE_HEIGHT, rec->version()) )
+            FATAL("merkle key misplaced node %s; ver %016llX lock %d", mkey.c_str(), rec->version(), ln);
     }
 
     if( !found ){
@@ -180,7 +185,8 @@ Merkle::add(const string& key, int treeid, int shard, int64_t ver){
     q_leafnext( treeid, ver, l.rec_size(), &val );
 #endif
 
-
+    if( ! _nlock[ln].trylock() ) FATAL("lock %d not locked", ln);
+    DEBUG("unlock %d", ln);
     _nlock[ln].unlock();
 
 }
@@ -197,7 +203,7 @@ Merkle::del(const string& key, int treeid, int shard, int64_t ver){
     ACPY2MerkleLeaf l;
     int keep = 0;
 
-    DEBUG("leaf %016llX => %s", ver, mkey.c_str());
+    DEBUG("leaf %016llX => %s lock %d", ver, mkey.c_str(), ln);
 
     // get leaf node, del, write
     _nlock[ln].lock();
@@ -219,6 +225,11 @@ Merkle::del(const string& key, int treeid, int shard, int64_t ver){
     // move deleted elems to front
     for(int i=0; i<l.rec_size(); i++){
         ACPY2MerkleLeafRec *rec = l.mutable_rec(i);
+
+        // XXX
+        if( merkle_level_version(MERKLE_HEIGHT, ver) != merkle_level_version(MERKLE_HEIGHT, rec->version()) )
+            FATAL("merkle key misplaced node %s; ver %016llX", mkey.c_str(), rec->version());
+
 
         if( rec->version() == ver && rec->key() == key ){
             // delete elem
@@ -255,6 +266,51 @@ Merkle::del(const string& key, int treeid, int shard, int64_t ver){
     _nlock[ln].unlock();
 }
 
+
+// is this key in the merkle tree?
+bool
+Merkle::exists(const string& key, int treeid, int shard, int64_t ver){
+    string mkey;
+    merkle_key(MERKLE_HEIGHT, treeid, ver, &mkey);
+    int ln = merkle_lock_number(MERKLE_HEIGHT, treeid, ver);
+
+    string *val;
+    ACPY2MerkleLeaf l;
+    int keep = 0;
+
+    DEBUG("leaf %016llX => %s", ver, mkey.c_str());
+
+    // get leaf node, del, write
+    _nlock[ln].lock();
+
+#ifdef LEAFCACHE
+    val = leafcache_get(ln, mkey);
+
+#else
+    string sval;
+    val = &sval;
+
+    _be->_get('m', mkey, val);
+#endif
+
+    l.ParsePartialFromString(*val);
+
+    DEBUG("entries %d", l.rec_size());
+
+    bool exists = 0;
+    for(int i=0; i<l.rec_size(); i++){
+        ACPY2MerkleLeafRec *rec = l.mutable_rec(i);
+
+        if( rec->version() == ver && rec->key() == key ){
+            exists = 1;
+        }
+    }
+
+    _nlock[ln].unlock();
+
+    return exists;
+}
+
 // same as del, with checks + cleaning
 void
 Merkle::fix(int treeid, int64_t ver){
@@ -266,7 +322,7 @@ Merkle::fix(int treeid, int64_t ver){
     string *val;
     ACPY2MerkleLeaf l;
 
-    DEBUG("leaf %016llX => %s", ver, mkey.c_str());
+    VERBOSE("leaf fix T%X %016llX => %s",treeid,  ver, mkey.c_str());
 
     // get leaf node, del, write
     _nlock[ln].lock();
@@ -337,6 +393,7 @@ Merkle::leafcache_get(int ln, const string& mkey){
 
     MerkleLeafCache *c = & _cache[ln];
 
+    DEBUG("get lock %d %s [%s]", ln, mkey.c_str(), c->_mkey.c_str());
     // do we already have it?
     if( c->_mkey == mkey )
         return & c->_data;
@@ -348,7 +405,10 @@ Merkle::leafcache_get(int ln, const string& mkey){
     // fetch
     c->_mkey  = mkey;
     c->_fixme = 0;
+    c->_dirty = 0;
+    c->_data.clear();
     _be->_get('m', mkey, & c->_data);
+    DEBUG("get lock %d fetch %s", ln, mkey.c_str());
 
     merkle_safe_to_stop = 0;
     return & c->_data;
@@ -359,11 +419,21 @@ Merkle::leafcache_set(int ln, int treeid, int64_t ver, int count, bool fixme){
 
     MerkleLeafCache *c = & _cache[ln];
 
+    DEBUG("set lock %d", ln);
     c->_treeid = treeid;
     c->_count  = count;
     c->_ver    = ver;
+    c->_dirty  = 1;
 
     if( fixme ) c->_fixme = 1;
+
+    // XXX
+    string mkey;
+    merkle_key(MERKLE_HEIGHT, treeid, ver, &mkey);
+
+    if( mkey != c->_mkey ){
+        FATAL("leaf cache botched; ckey %s, set key %s", c->_mkey.c_str(), mkey.c_str());
+    }
 }
 
 void
@@ -372,6 +442,9 @@ Merkle::leafcache_flush(int ln){
     MerkleLeafCache *c = & _cache[ln];
 
     if( c->_mkey.empty() ) return;
+    if( !c->_dirty )       return;
+
+    DEBUG("flush lock %d %s", ln, c->_mkey.c_str());
 
     if( c->_data.empty() )
         _be->_del('m', c->_mkey);
@@ -381,20 +454,33 @@ Merkle::leafcache_flush(int ln){
     // add leaf
     q_leafnext( c->_treeid, c->_ver, c->_count, & c->_data, c->_fixme );
 
+
+    // XXX
+    string mkey;
+    merkle_key(MERKLE_HEIGHT, c->_treeid, c->_ver, &mkey);
+
+    if( mkey != c->_mkey ){
+        FATAL("leaf cache flush botched; ckey %s, set key %s", c->_mkey.c_str(), mkey.c_str());
+    }
+
     c->_fixme = 0;
+    c->_dirty = 0;
     c->_data.clear();
     c->_mkey.clear();
-
 }
 
 bool
 Merkle::leafcache_maybe_flush(int ln){
     // if we can get the lock, flush it
-
+#if 0
     if( runmode.is_stopping() )
         _nlock[ln].lock();
     else
         if( _nlock[ln].trylock() ) return 0;
+
+#else
+    _nlock[ln].lock();
+#endif
 
     leafcache_flush(ln);
     _nlock[ln].unlock();
@@ -420,7 +506,7 @@ Merkle::q_leafnext(int treeid, uint64_t ver, int keycount, const string *rec, bo
     no->_level    = MERKLE_HEIGHT;
     no->_ver	  = merkle_level_version(MERKLE_HEIGHT, ver);
     no->_treeid   = treeid;
-    no->_children = 1;
+    no->_children = keycount ? 1 : 0;
     no->_keycount = keycount;
     no->_fixme    = fix;
 
@@ -487,12 +573,12 @@ Merkle::fix(int treeid, int level, int64_t ver){
 
     treeid &= 0xFFFF;
 
+    VERBOSE("fix T%X %d %016llx", treeid, level, ver);
+
     if( level == MERKLE_HEIGHT ){
         fix( treeid, ver );
         return ;
     }
-
-    return ;
 
     // climb down and find a leaf, fix it
     string mkey, val;
@@ -674,7 +760,11 @@ Merkle::apply_updates(MerkleChangeQ *l){
         l->pop_front();
 
         // update
-        DEBUG("+node %s", mkey.c_str());
+        string mk;
+        merkle_key(level, nx->_treeid, nx->_ver, &mk);
+        DEBUG("+node %s", mk.c_str());
+        if( mk != mkey ) FATAL("apply_updates botch %s != %s", mkey.c_str(), mk.c_str());
+
         bool c = update_node(nx, &val);
         if(c) changed = 1;
         if( nx->_fixme ) fixme = 1;
@@ -766,7 +856,7 @@ _get_leaf(const string& map, int level, int treeid, int64_t ver, const string& v
         rv->set_key( rec->key() );
         rv->set_isvalid( 1 );		// leaf-nodes are always good
 
-        //DEBUG("+L %02X_%016llX", level, rec->version() );
+        DEBUG(" +L %02X_%016llX", level, rec->version() );
     }
 
     return l.rec_size();
@@ -792,7 +882,7 @@ _get_upper(const string& map, int level, int treeid, int64_t ver, const string& 
         rv->set_hash( (char*) mn[i].hash, MERKLE_HASHLEN );
         rv->set_isvalid( stable );
 
-        //DEBUG("+%d %02X_%016llX->%d=%d", mn[i].slot, level+1, rv->version(), mn[i].children, mn[i].keycount);
+        DEBUG(" +%d %02X_%016llX->%d=%d", mn[i].slot, level+1, rv->version(), mn[i].children, mn[i].keycount);
     }
 
     return nn;
@@ -807,7 +897,7 @@ Merkle::get(int level, int treeid, int64_t ver, ACPY2CheckReply *res){
 
     string val;
     _be->_get('m', mkey, &val);
-    // DEBUG("mget %s [%d]", mkey.c_str(), val.size());
+    DEBUG("mget %s [%d]", mkey.c_str(), val.size());
     if( val.empty() ) return 0;
 
     if( level == MERKLE_HEIGHT ){
@@ -850,6 +940,9 @@ Merkle::compare_result(MerkleCache *cache, ACPY2CheckValue *r){
         if( slot == mn[i].slot ){
             const unsigned char *rh = (unsigned char *)r->hash().data();
             int res = memcmp(rh, mn[i].hash, MERKLE_HASHLEN);
+            if( mn[i].keycount != r->keycount() ) res = 1;
+            if( mn[i].children != r->children() ) res = 1;
+
             //DEBUG("hash %02X/%04X/%012llX %02X%02X %s %02X%02X",
             //      level, r->treeid(), r->version(),
             //      mn[i].hash[0], mn[i].hash[1],

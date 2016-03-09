@@ -80,6 +80,7 @@ static int set_expire(DBConf *, string *);
 SET_INT_VAL(tcp_threads, 0);
 SET_INT_VAL(udp_threads, 0);
 SET_INT_VAL(cio_threads, 0);
+SET_INT_VAL(ae_threads, 0);
 SET_INT_VAL(port_server, 0);
 SET_INT_VAL(port_console, 0);
 SET_INT_VAL(debuglevel, 0);
@@ -112,6 +113,7 @@ static struct {
     { "tcp_threads",	set_tcp_threads	   },
     { "udp_threads",	set_udp_threads	   },
     { "out_threads",	set_cio_threads	   },
+    { "ae_threads",	set_ae_threads	   },
     { "environment",    set_environment    },
     { "basedir",	set_basedir        },
     { "secret",		set_secret 	   },
@@ -508,6 +510,7 @@ Config::Config(){
     udp_threads	   = 2;
     tcp_threads	   = 4;
     cio_threads	   = 8;
+    ae_threads	   = 2;
     environment.assign("unknown");
 
     memset(debugflags, 0, sizeof(debugflags));

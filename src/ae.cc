@@ -38,8 +38,8 @@
 #define MAXFETCH	256
 #define MAXRESULTS	1024
 #define MAXERR		20
-#define MAXTHREAD	10
 
+extern bool db_uptodate;
 
 // this gets run periodically via store_maint()
 bool
@@ -245,11 +245,12 @@ Merkle::ae_work(Tinfo *ti){
             if( ++errs > MAXERR ) break;
             continue;
         }
+        int added = 0;
         errs = 0;
         // compare results
         // find highest level result, ignore others
         int highest = highest_level(res);
-        // DEBUG("  got %d looking at %d", res.check_size(), highest);
+        // DEBUG("  got %d highest at %d", res.check_size(), highest);
 
         for(int i=0; i<res.check_size(); i++){
             ACPY2CheckValue *c = res.mutable_check(i);
@@ -258,34 +259,39 @@ Merkle::ae_work(Tinfo *ti){
 
             if( c->level() > MERKLE_HEIGHT ){
                 // do we need this key?
-                // DEBUG("  node %02d_%016llX", c->level(), c->version());
+                // DEBUG("  key %02d_%016llX %s", c->level(), c->version(), c->key().c_str());
 
                 int  npart = _be->_ring->partno( c->shard() );
                 bool local = (npart == ti->part) || _be->_ring->is_local(npart);
                 if( !local ) continue;
+                if( c->key().empty() ) continue;
 
-                if( _be->want_it(c->key(), c->version()) ){
+                int w = _be->want_it(c->key(), c->version());
+                if( w == DBPUTST_WANT ){
                     ti->nsynced  ++;
-
+                    added ++;
                     ACPY2MapDatum *d = getreq.add_data();
                     d->set_map( _be->_name );
                     d->set_key( c->key() );
                     d->set_version( c->version() );
-
                     //DEBUG("   need key %s", c->key().c_str());
 
                     if( getreq.data_size() >= MAXFETCH ){
                         // process keys
-                        if( ! ae_fetch(ti->part, &getreq, ti->peer) ) ti->ok = 0;
+                        if( ! ae_fetch(ti->part, ti->treeid, &getreq, ti->peer) ) ti->ok = 0;
                     }
-                }else{
-                    // we went this far for a key we don't want,
+                }else if( w == DBPUTST_HAVE ){
+                    // we went this far for a key we already have
                     // make sure it is in the merkle tree
-                    if( req.level() != 0 ){
+                    if( db_uptodate && _be->_ring->is_stable() && ! exists( c->key(), ti->treeid, c->shard(), c->version() ) ){
+                        VERBOSE("   fix key %016llX %s", c->version(), c->key().c_str());
                         add( c->key(), ti->treeid, c->shard(), c->version() );
-                        fix( ti->treeid, c->level(), c->version() );
+                        // fix( ti->treeid, c->version() );
+                    }else{
+                        // DEBUG("   ok key %016llX %s", c->version(), c->key().c_str());
                     }
                 }
+
             }else{
 
                 // check the hash
@@ -293,6 +299,7 @@ Merkle::ae_work(Tinfo *ti){
                     // hash mismatch
                     badnode->add( c->level(), c->version() );
                     ti->mismatch ++;
+                    added ++;
                     // DEBUG("  node %02d_%016llX  => ne", c->level(), c->version());
                 }else{
                     // hash same
@@ -300,9 +307,16 @@ Merkle::ae_work(Tinfo *ti){
                 }
             }
         }
+#if 0	// the other side could just be out of date...
+        if( !added && req.level() && db_uptodate && _be->_ring->is_stable() ){
+            // we requested this node, but nothing under it was missing
+            //DEBUG("fix node %x %d %016llX", ti->treeid, req.level(), req.version());
+            fix( ti->treeid, req.level(), req.version() );
+        }
+#endif
     }
 
-    if( ! ae_fetch( ti->part, &getreq, ti->peer ) ) ti->ok = 0;
+    if( ! ae_fetch( ti->part, ti->treeid, &getreq, ti->peer ) ) ti->ok = 0;
     ti->active = 0;
 }
 
@@ -312,16 +326,17 @@ Merkle::ae(int part, int treeid, NetAddr *peer, uint64_t *nsync, uint64_t *mism)
     bool    ok       = 1;
     int64_t mismatch = 0;
     int64_t synced   = 0;
-    Tinfo   ti[MAXTHREAD];
     BadNode badnode;
 
     DEBUG("AE check %s[%d](%d) with %s", _be->_name.c_str(), part, treeid, peer->name.c_str());
 
     *nsync = 0;
     *mism  = 0;
+    int nthr = config->ae_threads;
+    Tinfo *ti = new Tinfo[nthr];
 
     // init helper thread info
-    for(int i=0; i<MAXTHREAD; i++){
+    for(int i=0; i<nthr; i++){
         ti[i].mk     = this;
         ti[i].bn     = &badnode;
         ti[i].peer   = peer;
@@ -338,7 +353,7 @@ Merkle::ae(int part, int treeid, NetAddr *peer, uint64_t *nsync, uint64_t *mism)
         if( runmode.is_stopping() ) break;
         if( badnode.empty() )       break;
 
-        for(int i=0; i<MAXTHREAD; i++){
+        for(int i=0; i<nthr; i++){
             if( runmode.is_stopping() ) break;
             if( badnode.empty() )       break;
             if( ti[i].active )          continue;
@@ -346,10 +361,16 @@ Merkle::ae(int part, int treeid, NetAddr *peer, uint64_t *nsync, uint64_t *mism)
             DEBUG("starting ae thread");
             start_thread( (void* (*)(void*))ae_work_start, (void*)(ti + i), 0 );
 
-            // exponentially increase delay before starting more
-            int d = (1<<i) * 30;
-            if( d < 60 )  d = 60;
-            if( d > 600 ) d = 600;
+            // delay before starting more
+            int d;
+            if( !i ){
+                d = 60;
+            }else if( i < nthr/2 ){
+                d = 30;
+            }else{
+                d = 60;
+            }
+
             for(int j=0; j<d; j++){
                 sleep(1);
                 if( runmode.is_stopping() ) break;
@@ -360,13 +381,14 @@ Merkle::ae(int part, int treeid, NetAddr *peer, uint64_t *nsync, uint64_t *mism)
     }
 
     // wait until all threads done
-    for(int i=0; i<MAXTHREAD; i++){
+    for(int i=0; i<nthr; i++){
         while( ti[i].active ) sleep(1);
         mismatch += ti[i].mismatch;
         synced   += ti[i].nsynced;
         if( ! ti[i].ok ) ok = 0;
     }
 
+    delete [] ti;
     *mism  = mismatch;
     *nsync = synced;
     return ok;
@@ -374,7 +396,7 @@ Merkle::ae(int part, int treeid, NetAddr *peer, uint64_t *nsync, uint64_t *mism)
 
 
 bool
-Merkle::ae_fetch(int part, ACPY2GetSet *req, NetAddr *peer){
+Merkle::ae_fetch(int part, int treeid, ACPY2GetSet *req, NetAddr *peer){
     bool ok  = 1;
     int errs = 0;
 
@@ -399,7 +421,14 @@ Merkle::ae_fetch(int part, ACPY2GetSet *req, NetAddr *peer){
         for(int i=0; i<req->data_size(); i++){
             ACPY2MapDatum *r = req->mutable_data(i);
             //DEBUG("   put %s", r->key().c_str());
-            _be->put( r, (int*)0);
+            int rp = _be->put( r, (int*)0);
+
+            if( rp == DBPUTST_HAVE ){
+                // we requested this, but already have it? is it missing from the merkle tree?
+                DEBUG("fix key %s", r->key().c_str());
+                add( r->key(), treeid, r->shard(), r->version() );
+                // fix( treeid, r->version() );
+            }
             INCSTAT( ae_fetched );
         }
     }

@@ -61,6 +61,7 @@ public:
     int 	_treeid;
     uint64_t 	_ver;
     bool	_fixme;
+    bool	_dirty;
 };
 
 // too speed up AE checks
@@ -84,13 +85,14 @@ public:
     Merkle(Database*);
     void add(const string&, int, int, int64_t);
     void del(const string&, int, int, int64_t);
+    bool exists(const string&, int, int, int64_t);
     void fix(int, int64_t);
     void fix(int, int, int64_t);
     int  get(int, int, int64_t, ACPY2CheckReply *);
     void flush(void);
     void check(void);
     bool ae(int, int, NetAddr*, uint64_t*, uint64_t*);
-    bool ae_fetch(int, ACPY2GetSet*, NetAddr*);
+    bool ae_fetch(int, int, ACPY2GetSet*, NetAddr*);
     void ae_work(Tinfo*);
     bool compare_result(MerkleCache*, ACPY2CheckValue*);
     bool repartition(int, int64_t*);

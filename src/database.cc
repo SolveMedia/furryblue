@@ -92,7 +92,7 @@ Database::get(ACPY2MapDatum *res){
             int shard  = shard_hash( res->key() );
             int part   = _ring->partno( res->shard() );
             int treeid = _ring->treeid(part);
-            VERBOSE("key/ver not found %016llx %s", res->version(), res->key().c_str());
+            VERBOSE("how odd key/ver not found %016llx %s", res->version(), res->key().c_str());
             _merk->del( res->key(), treeid, shard, res->version() );
         }
         return 0;	// wrong version
@@ -113,23 +113,23 @@ Database::get(ACPY2MapDatum *res){
     return 1;
 }
 
-
-bool
+// 0 => want it
+int
 Database::want_it(const string& key, int64_t ver){
 
     string old;
     _get('d', key, &old);
-    if( old.empty() ) return 1;		// don't have
+    if( old.empty() ) return DBPUTST_WANT;		// == 0, don't have
 
     DBRecord *pr = (DBRecord*) old.data();
 
-    if( ver > pr->ver ) return 1;	// our copy is stale
-
-    return 0;
+    if( ver < pr->ver ) return DBPUTST_OLD;		// our copy is newer
+    if( ver > pr->ver ) return DBPUTST_WANT;		// our copy is stale, we want it
+    return DBPUTST_HAVE;
 }
 
-// 1 => stored ok
-// 0 => did not want
+// 0 => stored ok
+// * => did not want
 int
 Database::put(ACPY2MapDatum *req, int *opart){
 
@@ -298,9 +298,10 @@ Database::get_merkle(int level, int treeid, int64_t ver, int maxresult, ACPY2Che
 
     int nm = _merk->get(level, treeid, ver, res);
 
-    if( !nm ){
+    if( !nm && db_uptodate && _ring->is_stable() ){
         // nothing here, but someone was looking.
-        _merk->fix(level, treeid, ver); // check for problem
+        VERBOSE("how odd. nothing here. %X %d %016llX", treeid, level, ver);
+        _merk->fix(treeid, level, ver); // check for problem
         return 0;
     }
 
@@ -333,8 +334,10 @@ Database::get_merkle(int level, int treeid, int64_t ver, int maxresult, ACPY2Che
                 expected = mv->keycount();
             }
             if( nr != expected ) fixme = 1;
+            if(  mv->children() && !mv->keycount() ) fixme = 1;
+            if( !mv->children() &&  mv->keycount() ) fixme = 1;
 
-            if( fixme && db_uptodate && (mv->version() < lr_usec() - TOONEW) ){
+            if( fixme && db_uptodate && _ring->is_stable() && (mv->version() < lr_usec() - TOONEW) ){
                 VERBOSE("how odd. got merkle: nr %d, expected %d [%d %04X %016llX]", nr, expected, cl, treeid, mv->version() );
                 _merk->fix(treeid, cl, mv->version());
             }

@@ -234,14 +234,8 @@ cmd_shut(Console *con, const char *cmd, int len){
 	con->output("crashing\n");
         _exit(EXIT_ERROR_RESTART);
 
-    }else if( !strncmp(cmd, "cancel", 6) ){
-        VERBOSE("canceling shutdown");
-        con->output("canceling shutdown\n");
-        // NB: there is a race condition here
-        runmode.cancel();
-
     }else{
-	con->output("? shutdown graceful|immediate|restart|crash|cancel\n");
+	con->output("? shutdown graceful|immediate|restart|crash\n");
     }
 
     return 1;
