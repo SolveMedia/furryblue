@@ -53,6 +53,7 @@ public:
     int  get(ACPY2MapDatum *res);
     int  put(ACPY2MapDatum *req, int*);
     int  want_it(const string&, int64_t);
+    int64_t have_ver(const string&);
     int  remove(const string&, int64_t);
     int  expire(int64_t max);
     int  get_internal(char, const string& key, string *res);

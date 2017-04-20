@@ -88,6 +88,8 @@ public:
     bool exists(const string&, int, int, int64_t);
     void fix(int, int64_t);
     void fix(int, int, int64_t);
+    void clear_node(int, int, int64_t);
+    int  get_node_and_lock(int, int, int64_t, string*);
     int  get(int, int, int64_t, ACPY2CheckReply *);
     void flush(void);
     void check(void);
@@ -95,6 +97,8 @@ public:
     bool ae_fetch(int, int, ACPY2GetSet*, NetAddr*);
     void ae_work(Tinfo*);
     bool compare_result(MerkleCache*, ACPY2CheckValue*);
+    int  get_leaf( const string& map, int level, int treeid, int64_t ver, const string& val, ACPY2CheckReply *res);
+    int  get_upper(const string& map, int level, int treeid, int64_t ver, const string& val, ACPY2CheckReply *res, bool stable);
     bool repartition(int, int64_t*);
     void upgrade(void);
 private:
