@@ -266,8 +266,10 @@ Merkle::ae_work(Tinfo *ti){
                 if( !local ) continue;
                 if( c->key().empty() ) continue;
 
-                int w = _be->want_it(c->key(), c->version());
-                if( w == DBPUTST_WANT ){
+                int64_t havever = _be->have_ver( c->key() );
+                bool want = havever < c->version();
+
+                if( want ){
                     ti->nsynced  ++;
                     added ++;
                     ACPY2MapDatum *d = getreq.add_data();
@@ -280,15 +282,22 @@ Merkle::ae_work(Tinfo *ti){
                         // process keys
                         if( ! ae_fetch(ti->part, ti->treeid, &getreq, ti->peer) ) ti->ok = 0;
                     }
-                }else if( w == DBPUTST_HAVE ){
+                }else if( havever == c->version() ){
                     // we went this far for a key we already have
                     // make sure it is in the merkle tree
                     if( db_uptodate && _be->_ring->is_stable() && ! exists( c->key(), ti->treeid, c->shard(), c->version() ) ){
-                        VERBOSE("   fix key %016llX %s", c->version(), c->key().c_str());
+                        VERBOSE("   +fix key %016llX %s", c->version(), c->key().c_str());
                         add( c->key(), ti->treeid, c->shard(), c->version() );
                         // fix( ti->treeid, c->version() );
                     }else{
                         // DEBUG("   ok key %016llX %s", c->version(), c->key().c_str());
+                    }
+                }else{
+                    DEBUG("   dont want key have=%016llX != offer=%016llX %s", havever, c->version(), c->key().c_str());
+
+                    if( db_uptodate && _be->_ring->is_stable() && exists( c->key(), ti->treeid, c->shard(), c->version() ) ){
+                        VERBOSE("   -fix key %016llX %s", c->version(), c->key().c_str());
+                        del( c->key(), ti->treeid, c->shard(), c->version() );
                     }
                 }
 
@@ -307,10 +316,10 @@ Merkle::ae_work(Tinfo *ti){
                 }
             }
         }
-#if 0	// the other side could just be out of date...
+#if 1
         if( !added && req.level() && db_uptodate && _be->_ring->is_stable() ){
             // we requested this node, but nothing under it was missing
-            //DEBUG("fix node %x %d %016llX", ti->treeid, req.level(), req.version());
+            DEBUG("fix node %x %d %016llX", ti->treeid, req.level(), req.version());
             fix( ti->treeid, req.level(), req.version() );
         }
 #endif

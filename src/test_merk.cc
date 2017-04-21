@@ -32,7 +32,7 @@ main(int argc, char **argv){
     ACPY2CheckReply   res;
     int c;
     int numtree=1;
-    const char *host = "127.0.0.1";
+    const char *host = "127.0.0.1:4508";
     const char *map  = "test3";
 
     // -d debug

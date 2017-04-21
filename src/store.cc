@@ -15,6 +15,7 @@
 #include "network.h"
 #include "store.h"
 #include "database.h"
+#include "runmode.h"
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -44,7 +45,6 @@ void
 store_exit(void){
     // close databases
     ndb = 0;
-    pthread_cancel( maint_tid );
     sleep(1);
     delete [] dbs;
 }
@@ -57,6 +57,7 @@ store_maint(void*){
     while(1){
         if(ndb) store_ae();
         sleep(5);
+        if( runmode.is_stopping() ) return 0;
     }
 }
 
@@ -191,6 +192,13 @@ store_ae(void){
     // we are up to date if all databases AEed ok
     if( ok ){
         db_uptodate = 1;
-        sleep(25);	// we're good, no need to check too often
+
+        // we're good, no need to check too often
+        for(int i=0; i<25; i++){
+            if( runmode.is_stopping() ) return;
+            sleep(1);
+        }
     }
+
+    if( runmode.is_stopping() ) return;
 }

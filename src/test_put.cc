@@ -39,8 +39,15 @@ main(int argc, char **argv){
     req.set_sender( "localhost" );
     ACPY2MapDatum *d = req.mutable_data();
 
-    d->set_map( "cmdb" );
-    d->set_key( "foobar" );
+    d->set_map( "test3" );
+
+    // unique key
+    char buf[32];
+    snprintf(buf, sizeof(buf), "key-p-%x", random());
+    VERBOSE("key %s", buf);
+    d->set_key( buf );
+    //d->set_key( "foobar" );
+
     d->set_shard( random() << 1 );
     d->set_version( now );
     d->set_value( "abc123" );

@@ -250,8 +250,10 @@ ClientIO::ClientIO(const NetAddr& addr, int reqno, const google::protobuf::Messa
     int is_enc = 0;
     if( ! addr.same_dc ){
         int sz = acp_encrypt( buf.data(), buf.size(), &buf );
-        DEBUG("encrypt req %d", sz);
-        is_enc = 1;
+        if( sz > 0 ){
+            DEBUG("encrypt req %d", sz);
+            is_enc = 1;
+        }
     }
 
     _wbuf.reserve( sizeof(protocol_header) + buf.size() );

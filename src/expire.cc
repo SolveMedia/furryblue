@@ -20,6 +20,7 @@
 #include "expire.h"
 #include "partition.h"
 #include "database.h"
+#include "runmode.h"
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -44,7 +45,11 @@ expire_maint(void *x){
     while(1){
         e->flush();
         e->expire();
-        sleep(60);	// XXX - configurable
+
+        for(int i=0; i<60; i++){
+            if( runmode.is_stopping() ) return 0;
+            sleep(1);
+        }
     }
 }
 

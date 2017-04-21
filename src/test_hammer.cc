@@ -15,6 +15,7 @@
 #include "netutil.h"
 #include "hrtime.h"
 #include "clientio.h"
+#include "runmode.h"
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -43,6 +44,7 @@ void sendreq(void);
   -c 100 => 7000/sec
 */
 
+RunMode runmode;
 Config *config = 0;
 const char *database = "test3";
 int num_sent = 0;
@@ -74,7 +76,7 @@ main(int argc, char **argv){
 
     int v = inet_aton("127.0.0.1", &a);
     dstaddr.ipv4 = a.s_addr;
-    dstaddr.port = 3508;
+    dstaddr.port = 4508;
     dstaddr.name = "localhost";
     pid = getpid();
     srand48(pid);
@@ -168,12 +170,12 @@ build_req(ACPY2DistRequest *req){
 
     // unique key
     char buf[32];
-    snprintf(buf, sizeof(buf), "key-%x", lrand48());
+    snprintf(buf, sizeof(buf), "key-%x", lrand48() & 0xFF);
     DEBUG("key %s", buf);
 
     d->set_map( database );
     d->set_key( buf );
-    d->set_shard( lrand48() << 1 ); // shard(d->key()) );
+    d->set_shard( shard(d->key()) );
     d->set_version( now );
     d->set_value( buf );
 }
@@ -200,6 +202,7 @@ another(void){
 
     ACPY2DistRequest req;
     build_req( &req );
+    DEBUG("dist?");
     new Distribute( dstaddr, &req );
 }
 
@@ -209,6 +212,7 @@ another(void){
 Distribute::Distribute(const NetAddr& addr, const ACPY2DistRequest *req)
     : ClientIO(addr, PHMT_Y2_DIST, req) {
 
+    DEBUG("dist? %x.", &result);
     _res    = &result;
 
     DEBUG("sending to %s", addr.name.c_str());

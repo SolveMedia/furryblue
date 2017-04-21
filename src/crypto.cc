@@ -232,6 +232,9 @@ _iv(const char *key, int keylen, int64_t seq, char *out, int outlen){
 static bool
 _acp_encrypt(const char *in, int inlen, ACPEncrypt *res){
 
+    if( ! config ) return 0;
+    if( config->secret.empty() ) return 0;
+
     // pick seqno, nonce, generate key + iv
     int64_t seqno = hr_usec();
     char nonce[48], key[16], iv[16];

@@ -92,7 +92,7 @@ Database::get(ACPY2MapDatum *res){
             int shard  = shard_hash( res->key() );
             int part   = _ring->partno( res->shard() );
             int treeid = _ring->treeid(part);
-            VERBOSE("how odd key/ver not found %016llx %s", res->version(), res->key().c_str());
+            VERBOSE("how odd key/ver not found %s %016llx %s", _name.c_str(), res->version(), res->key().c_str());
             _merk->del( res->key(), treeid, shard, res->version() );
         }
         return 0;	// wrong version
@@ -111,6 +111,17 @@ Database::get(ACPY2MapDatum *res){
     // RSN - process types
 
     return 1;
+}
+
+int64_t
+Database::have_ver(const string& key){
+
+    string old;
+    _get('d', key, &old);
+    if( old.empty() ) return 0;
+
+    DBRecord *pr = (DBRecord*) old.data();
+    return pr->ver;
 }
 
 // 0 => want it
@@ -154,7 +165,7 @@ Database::put(ACPY2MapDatum *req, int *opart){
     int lockno = req->shard() % NDBLOCK;
 
     hrtime_t t0 = hr_usec();
-    DEBUG("shard %x part %d tree %x lock %d", req->shard(), part, treeid, lockno);
+    DEBUG("shard %x part %d tree %x lock %d; %s", req->shard(), part, treeid, lockno, req->key().c_str());
     // is this partition on this server?
     if( !_ring->is_local(part) ){
         DEBUG("not local");
@@ -180,6 +191,7 @@ Database::put(ACPY2MapDatum *req, int *opart){
             return DBPUTST_HAVE;
         }
 
+        DEBUG("remove old merk");
         _merk->del( req->key(), treeid, pr->shard, pr->ver );
     }
     hrtime_t t3 = hr_usec();
@@ -298,9 +310,9 @@ Database::get_merkle(int level, int treeid, int64_t ver, int maxresult, ACPY2Che
 
     int nm = _merk->get(level, treeid, ver, res);
 
-    if( !nm && db_uptodate && _ring->is_stable() ){
+    if( !nm && db_uptodate && _ring->is_stable() && level ){
         // nothing here, but someone was looking.
-        VERBOSE("how odd. nothing here. %X %d %016llX", treeid, level, ver);
+        VERBOSE("how odd. nothing here. %s %X %d %016llX", _name.c_str(), treeid, level, ver);
         _merk->fix(treeid, level, ver); // check for problem
         return 0;
     }
@@ -338,7 +350,7 @@ Database::get_merkle(int level, int treeid, int64_t ver, int maxresult, ACPY2Che
             if( !mv->children() &&  mv->keycount() ) fixme = 1;
 
             if( fixme && db_uptodate && _ring->is_stable() && (mv->version() < lr_usec() - TOONEW) ){
-                VERBOSE("how odd. got merkle: nr %d, expected %d [%d %04X %016llX]", nr, expected, cl, treeid, mv->version() );
+                VERBOSE("how odd. got merkle: %s nr %d, expected %d [%d %04X %016llX]", _name.c_str(), nr, expected, cl, treeid, mv->version() );
                 _merk->fix(treeid, cl, mv->version());
             }
 

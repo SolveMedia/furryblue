@@ -12,7 +12,7 @@
 #include "thread.h"
 #include "lock.h"
 #include "diag.h"
-
+#include "runmode.h"
 
 static void
 lock_report(hrtime_t t0, hrtime_t t1, hrtime_t t2){
@@ -59,7 +59,7 @@ Mutex::lock(void){
 void
 Mutex::unlock(void){
     int e = pthread_mutex_unlock( &_mutex );
-    if(e) FATAL("mutex unlock failed %d", e);
+    if(e && !runmode.is_stopping() ) FATAL("mutex unlock failed %d", e);
 }
 
 int

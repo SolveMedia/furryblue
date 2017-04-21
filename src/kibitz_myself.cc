@@ -177,8 +177,8 @@ about_myself(ACPY2Status *g){
     g->set_via( myserver_id.c_str() );
     g->set_path( "." );
 
-    if( config->available && (runmode.mode() == RUN_MODE_RUN) ){
-        g->set_status( (now > starttime + BOOTTIME) ? 200 : 102 );
+    if( config->available && (runmode.mode() == RUN_MODE_RUN) && (now > starttime + BOOTTIME) ){
+        g->set_status( 200 );
     }else{
         g->set_status( 102 );
     }

@@ -37,6 +37,7 @@
 
 #define F16		0xFFFFFFFFFFFFFFFFLL
 #define LEAFCACHE
+//#define MERKFIX
 
 void hex_encode(const unsigned char *in, int inlen, char *out, int outlen);
 
@@ -52,6 +53,10 @@ merkle_flusher(void *x){
     while(1){
         m->flush();
         sleep(5);
+        if( runmode.is_stopping() ){
+            merkle_safe_to_stop = 1;
+            return 0;
+        }
     }
 }
 
@@ -90,6 +95,12 @@ merkle_lock_number(int l, int treeid, uint64_t ver){
 static inline int
 merkle_slot(int l, int64_t ver){
     return (merkle_number(ver) >> ((MERKLE_HEIGHT - l) << 2)) & 0xF;
+}
+
+static inline uint64_t
+merkle_next_version(int l, uint64_t ver, int slot){
+    int slsh = (MERKLE_HEIGHT - l + 3) << 2;
+    return merkle_level_version(l, ver) | (slot << slsh);
 }
 
 //################################################################
@@ -133,7 +144,7 @@ Merkle::add(const string& key, int treeid, int shard, int64_t ver){
 
     ACPY2MerkleLeaf l;
 
-    DEBUG("leaf %d %016llX => %s lock %d", treeid, ver, mkey.c_str(), ln);
+    DEBUG("leaf %d %016llX => %s lock %d; %s", treeid, ver, mkey.c_str(), ln, key.c_str());
 
     // get leaf node, append, write
     _nlock[ln].lock();
@@ -142,6 +153,7 @@ Merkle::add(const string& key, int treeid, int shard, int64_t ver){
 #ifdef LEAFCACHE
     string *val = leafcache_get(ln, mkey);
     l.ParsePartialFromString( *val );
+    DEBUG("sz %d nr %d", val->size(), l.rec_size());
 #else
     string val;
     _be->_get('m', mkey, &val);
@@ -156,6 +168,9 @@ Merkle::add(const string& key, int treeid, int shard, int64_t ver){
         if( rec->version() == ver && rec->key() == key ){
             found = 1;
             break;
+        }else{
+            if( rec->key() == key )
+                DEBUG("!= %s %s; %016llX %016llx", key.c_str(), rec->key().c_str(), ver, rec->version());
         }
 
         // XXX
@@ -173,10 +188,14 @@ Merkle::add(const string& key, int treeid, int shard, int64_t ver){
             google::protobuf::RepeatedPtrField<ACPY2MerkleLeafRec> *lc = l.mutable_rec();
             std::sort( lc->begin(), lc->end(), leafrec_compare );
         }
+        DEBUG("grow %d", l.rec_size());
+    }else{
+        DEBUG("found");
     }
 
 #ifdef LEAFCACHE
     l.SerializeToString( val );
+    DEBUG("sz %d nr %d", val->size(), l.rec_size());
     leafcache_set(ln, treeid, ver, l.rec_size() );
 #else
     l.SerializeToString( &val );
@@ -203,7 +222,7 @@ Merkle::del(const string& key, int treeid, int shard, int64_t ver){
     ACPY2MerkleLeaf l;
     int keep = 0;
 
-    DEBUG("leaf %016llX => %s lock %d", ver, mkey.c_str(), ln);
+    DEBUG("leaf %d %016llX => %s lock %d; %s", treeid, ver, mkey.c_str(), ln, key.c_str());
 
     // get leaf node, del, write
     _nlock[ln].lock();
@@ -220,6 +239,7 @@ Merkle::del(const string& key, int treeid, int shard, int64_t ver){
 
     l.ParsePartialFromString(*val);
 
+    DEBUG("nr %d", l.rec_size());
     // DEBUG("l=%d, %s", val.size(), l.ShortDebugString().c_str());
 
     // move deleted elems to front
@@ -240,8 +260,11 @@ Merkle::del(const string& key, int treeid, int shard, int64_t ver){
             ++keep;
         }
     }
+    if( l.rec_size() == keep ) VERBOSE("not found! %s %016llX", key.c_str(), ver);
+
     l.mutable_rec()->DeleteSubrange(keep, l.rec_size() - keep);
 
+    DEBUG("nr %d", l.rec_size());
     // DEBUG("l=%d, %s", val.size(), l.ShortDebugString().c_str());
 
     if( l.rec_size() ){
@@ -301,7 +324,7 @@ Merkle::exists(const string& key, int treeid, int shard, int64_t ver){
     for(int i=0; i<l.rec_size(); i++){
         ACPY2MerkleLeafRec *rec = l.mutable_rec(i);
 
-        if( rec->version() == ver && rec->key() == key ){
+        if( (rec->version() == ver) && (rec->key() == key) ){
             exists = 1;
         }
     }
@@ -315,6 +338,7 @@ Merkle::exists(const string& key, int treeid, int shard, int64_t ver){
 void
 Merkle::fix(int treeid, int64_t ver){
 
+#ifdef MERKFIX
     string mkey;
     merkle_key(MERKLE_HEIGHT, treeid, ver, &mkey);
     int ln = merkle_lock_number(MERKLE_HEIGHT, treeid, ver);
@@ -327,15 +351,15 @@ Merkle::fix(int treeid, int64_t ver){
     // get leaf node, del, write
     _nlock[ln].lock();
 
-#ifdef LEAFCACHE
+# ifdef LEAFCACHE
     val = leafcache_get(ln, mkey);
 
-#else
+# else
     string sval;
     val = &sval;
 
     _be->_get('m', mkey, val);
-#endif
+# endif
 
     l.ParsePartialFromString(*val);
     int oldsize = l.rec_size();
@@ -371,9 +395,9 @@ Merkle::fix(int treeid, int64_t ver){
         val->clear();
     }
 
-#ifdef LEAFCACHE
+# ifdef LEAFCACHE
     leafcache_set(ln, treeid, ver, l.rec_size(), 1 );
-#else
+# else
     if( ! val->empty() ){
         _be->_put('m', mkey, *val);
     }else{
@@ -381,11 +405,12 @@ Merkle::fix(int treeid, int64_t ver){
     }
     // queue higher nodes
     q_leafnext( treeid, ver, l.rec_size(), val, 1 );
-#endif
+# endif
 
     _nlock[ln].unlock();
 
     DEBUG(" changed %d -> %d", oldsize, newsize);
+#endif /* MERKFIX */
 }
 
 string *
@@ -419,7 +444,7 @@ Merkle::leafcache_set(int ln, int treeid, int64_t ver, int count, bool fixme){
 
     MerkleLeafCache *c = & _cache[ln];
 
-    DEBUG("set lock %d", ln);
+    DEBUG("set lock %d c %d", ln, count);
     c->_treeid = treeid;
     c->_count  = count;
     c->_ver    = ver;
@@ -444,7 +469,7 @@ Merkle::leafcache_flush(int ln){
     if( c->_mkey.empty() ) return;
     if( !c->_dirty )       return;
 
-    DEBUG("flush lock %d %s", ln, c->_mkey.c_str());
+    DEBUG("flush lock %d %s c %d sz %d", ln, c->_mkey.c_str(), c->_count, c->_data.size());
 
     if( c->_data.empty() )
         _be->_del('m', c->_mkey);
@@ -527,6 +552,7 @@ sort_node_compare(const MerkleNode &a, const MerkleNode &b){
     return 0;
 }
 
+#ifdef MERKFIX
 static bool
 clean_fix_merkle_node(string *val){
 
@@ -567,10 +593,68 @@ clean_fix_merkle_node(string *val){
     return changed;
 }
 
+static int
+fix_which_slot(string *val){
+    MerkleNode *mn = (MerkleNode*) val->data();
+    int nn = val->size() / sizeof(MerkleNode);
+
+    // is there a dupe or obviously broken slot?
+    int badslot = -1;
+    int mask = 0;
+
+    for(int i=0; i<nn; i++){
+        if( mn[i].children && !mn[i].keycount ) return i;
+        if( !mn[i].children && mn[i].keycount ) return i;
+        if( mask & (1 << mn[i].slot) )          return i;
+
+        mask |= (1 << mn[i].slot);
+    }
+
+    return random_n(nn);
+}
+#endif
+
+void
+Merkle::clear_node(int treeid, int level, int64_t ver){
+
+    string mkey;
+    merkle_key(level, treeid, ver, &mkey);
+    _be->_del('m', mkey);
+
+    MerkleChange * no = new MerkleChange;
+    memset(no->_hash, 0, MERKLE_HASHLEN);
+
+    no->_level    = level;
+    no->_ver	  = ver;
+    no->_treeid   = treeid;
+    no->_children = 0;
+    no->_keycount = 0;
+    no->_fixme    = 1;
+
+    _lock.lock();
+    _mnm->push_back(no);
+    _lock.unlock();
+}
+
+// returns locknumber
+int
+Merkle::get_node_and_lock(int treeid, int level, int64_t ver, string *val){
+
+    string mkey;
+    merkle_key(level, treeid, ver, &mkey);
+    int ln = merkle_lock_number(level, treeid, ver);
+
+    _nlock[ln].lock();
+    _be->_get('m', mkey, val);
+
+    return ln;
+}
+
 void
 Merkle::fix(int treeid, int level, int64_t ver){
     // get node, check, and fix
 
+#ifdef MERKFIX
     treeid &= 0xFFFF;
 
     VERBOSE("fix T%X %d %016llx", treeid, level, ver);
@@ -580,23 +664,54 @@ Merkle::fix(int treeid, int level, int64_t ver){
         return ;
     }
 
-    // climb down and find a leaf, fix it
-    string mkey, val;
+    string val;
 
+    // find any slots that say they are empty, but shouldn't
+    int ln = get_node_and_lock(treeid, level, ver, &val);
+    _nlock[ln].unlock();
+
+    if( ! val.empty() ){
+        MerkleNode *mn = (MerkleNode*) val.data();
+        int nn = val.size() / sizeof(MerkleNode);
+        int mask = 0;
+
+        for(int i=0; i<nn; i++){
+            mask |= (1 << mn[i].slot);
+        }
+
+        for(int i=0; i<16; i++){
+            if( !(mask & (1<<i)) ){
+                string chk;
+                uint64_t nver = merkle_next_version(level, ver, i);
+                int l = get_node_and_lock(treeid, level+1, nver, &chk);
+                _nlock[l].unlock();
+
+                // it should not exist
+                if( chk.empty() ) continue;
+                // fix it...
+                VERBOSE("fixing orphan m=%x %d %016llX [%d] -> %d %016llX -> l=%d", mask, level, ver, i, level+1, nver, chk.size());
+                fix(treeid, level + 1, nver);
+            }
+        }
+    }
+
+    // climb down and find a leaf, fix it
     while( level != MERKLE_HEIGHT ){
-        merkle_key(level, treeid, ver, &mkey);
-        int ln = merkle_lock_number(level, treeid, ver);
-        _nlock[ln].lock();
-        _be->_get('m', mkey, &val);
-        _nlock[ln].unlock();
+        int ln = get_node_and_lock(treeid, level, ver, &val);
 
         // pick next node to fetch
 
-        if( val.empty() ) return;
+        if( val.empty() ){
+            VERBOSE("clearing node %d %016llX", level, ver);
+            clear_node(treeid, level, ver);
+            _nlock[ln].unlock();
+            return;
+        }
+        _nlock[ln].unlock();
 
         MerkleNode *mn = (MerkleNode*) val.data();
         int nn = val.size() / sizeof(MerkleNode);
-        int i  = random_n(nn);
+        int i  = fix_which_slot( &val );
 
         uint64_t mask = F16 << ((MERKLE_HEIGHT - level + 4) << 2);
         uint64_t nver = ver & mask;
@@ -605,8 +720,9 @@ Merkle::fix(int treeid, int level, int64_t ver){
         level ++;
     }
 
+    VERBOSE("fixing leaf %016llX", ver);
     fix( treeid, ver );
-
+#endif /* MERKFIX */
 }
 
 // update on disk data with new info
@@ -621,6 +737,8 @@ update_node(MerkleChange *no, string *val){
     MerkleNode *mn = (MerkleNode*) val->data();
     int nn = val->size() / sizeof(MerkleNode);
     int i=0, j;
+
+    DEBUG(" val sz %d %d", val->size(), nn);
 
     if( nn > 16 ) no->_fixme = 1;
 
@@ -637,9 +755,10 @@ update_node(MerkleChange *no, string *val){
     }
 
     if( no->_fixme ){
+#ifdef MERKFIX
         // check for dupes, unsorted
         changed = clean_fix_merkle_node( val );
-
+#endif
         nn = val->size() / sizeof(MerkleNode);
 
         // re-search
@@ -647,6 +766,7 @@ update_node(MerkleChange *no, string *val){
             if( mn[i].slot == slot ) break;
         }
     }
+
 
     if( no->_children ){
         bool resort = 0;
@@ -657,6 +777,7 @@ update_node(MerkleChange *no, string *val){
             nn ++;
             changed = 1;
             resort  = 1;
+            DEBUG(" add: sz %d %d", val->size(), nn);
         }else{
             if( memcmp(no->_hash, mn[i].hash, MERKLE_HASHLEN) ) changed = 1;
             if( no->_keycount != mn[i].keycount ) changed = 1;
@@ -676,13 +797,17 @@ update_node(MerkleChange *no, string *val){
         // remove empty entry
         if( i != nn ){
             if( i != nn - 1 )
-                memmove( mn+i, mn+i+1, sizeof(MerkleNode) );
+                memmove( mn+i, mn+i+1, (nn-1) * sizeof(MerkleNode) );
             val->resize( (nn-1) * sizeof(MerkleNode) );
             changed = 1;
+            nn -= 1;
+            DEBUG(" del: val sz %d %d", val->size(), nn);
+        }else{
+            DEBUG(" not f: val sz %d %d %d", val->size(), nn, i);
         }
     }
 
-    if( changed ) DEBUG("  changed node %d_%016llX slot %d ch %d kc %d", no->_level, no->_ver, slot, no->_children, no->_keycount);
+    if( changed ) DEBUG("  changed node %d_%016llX slot %d of %d ch %d kc %d", no->_level, no->_ver, slot, nn, no->_children, no->_keycount);
     if( no->_fixme && changed ) VERBOSE("  fixed merkle node %d_%016llX", no->_level, no->_ver);
 
     return changed;
@@ -715,7 +840,7 @@ aggr_nodes(int level, int treeid, uint64_t ver, const string *val, MerkleChange 
 
     char buf[64];
     hex_encode( res->_hash, MERKLE_HASHLEN, buf, sizeof(buf));
-    DEBUG("\t[%s]", buf );
+    DEBUG("\t%d_%016llX [%s] n %d, c %d, kc %d", level, ver, buf, nn, res->_children, res->_keycount );
 }
 
 
@@ -749,11 +874,13 @@ Merkle::apply_updates(MerkleChangeQ *l){
 
     int64_t aver = merkle_level_version(level, no->_ver);
 
+    DEBUG(" val sz %d", val.size());
+
     // anything else to add?
     while( !l->empty() ){
         MerkleChange *nx = l->front();
         // same batch?
-        if( no->_level != nx->_level ) break;
+        if( no->_level  != nx->_level  ) break;
         if( no->_treeid != nx->_treeid ) break;
         if( aver != merkle_level_version(level, nx->_ver) ) break;
 
@@ -772,9 +899,15 @@ Merkle::apply_updates(MerkleChangeQ *l){
     }
 
     if( changed ){
+        DEBUG("node %s changed sz %d", mkey.c_str(), val.size());
         // insert
-        _be->_put('m', mkey, val);
+        if( val.empty() )
+            _be->_del('m', mkey);
+        else
+            _be->_put('m', mkey, val);
     }
+
+    if( ! _nlock[ln].trylock() ) FATAL("lock %d not locked", ln);
     _nlock[ln].unlock();
 
     if( !changed && !fixme ){
@@ -837,14 +970,23 @@ Merkle::flush(void){
 
 //################################################################
 
-static inline int
-_get_leaf(const string& map, int level, int treeid, int64_t ver, const string& val, ACPY2CheckReply *res){
+int
+Merkle::get_leaf(const string& map, int level, int treeid, int64_t ver, const string& val, ACPY2CheckReply *res){
     ACPY2MerkleLeaf l;
     l.ParsePartialFromString(val);
 
     // copy records from leaf-node into result
     for(int i=0; i<l.rec_size(); i++){
         ACPY2MerkleLeafRec *rec = l.mutable_rec(i);
+
+        // validate
+        int64_t havever = _be->have_ver( rec->key() );
+        if( havever != rec->version() ){
+            VERBOSE("dead leaf %016llX %s", rec->version(), rec->key().c_str());
+            del( rec->key(), treeid, rec->shard(), rec->version() );
+            continue;
+        }
+
         ACPY2CheckValue    *rv  = res->add_check();
 
         rv->set_treeid( treeid );
@@ -862,16 +1004,26 @@ _get_leaf(const string& map, int level, int treeid, int64_t ver, const string& v
     return l.rec_size();
 }
 
-static inline int
-_get_upper(const string& map, int level, int treeid, int64_t ver, const string& val, ACPY2CheckReply *res, bool stable){
+int
+Merkle::get_upper(const string& map, int level, int treeid, int64_t ver, const string& val, ACPY2CheckReply *res, bool stable){
     MerkleNode *mn = (MerkleNode*) val.data();
     int nn = val.size() / sizeof(MerkleNode);
 
     uint64_t mask = F16 << ((MERKLE_HEIGHT - level + 4) << 2);
     uint64_t nver = ver & mask;
     int slshift = (MERKLE_HEIGHT - level + 3) << 2;
+    int checkmask = 0;
 
     for(int i=0; i<nn; i++){
+        // check for corruption
+        if( checkmask & (1 << mn[i].slot) ){
+            // uh oh
+            VERBOSE("dupe entry! %d %02X_%016llX", mn[i].slot, level+1, ver);
+            fix(treeid,level,ver);
+            continue;
+        }
+        checkmask |= (1 << mn[i].slot);
+
         ACPY2CheckValue *rv  = res->add_check();
         rv->set_treeid( treeid );
         rv->set_level( level + 1 );
@@ -883,6 +1035,7 @@ _get_upper(const string& map, int level, int treeid, int64_t ver, const string& 
         rv->set_isvalid( stable );
 
         DEBUG(" +%d %02X_%016llX->%d=%d", mn[i].slot, level+1, rv->version(), mn[i].children, mn[i].keycount);
+
     }
 
     return nn;
@@ -901,9 +1054,9 @@ Merkle::get(int level, int treeid, int64_t ver, ACPY2CheckReply *res){
     if( val.empty() ) return 0;
 
     if( level == MERKLE_HEIGHT ){
-        return _get_leaf( _be->_name, level, treeid, ver, val, res);
+        return get_leaf( _be->_name, level, treeid, ver, val, res);
     }else{
-        return _get_upper(_be->_name, level, treeid, ver, val, res, _be->_ring->is_stable());
+        return get_upper(_be->_name, level, treeid, ver, val, res, _be->_ring->is_stable());
     }
 }
 

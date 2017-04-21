@@ -49,7 +49,7 @@ static void *
 peerdb_periodic(void *notused){
 
     while(1){
-        if( runmode.mode() == RUN_MODE_EXITING ) return 0;
+        if( runmode.is_stopping() ) return 0;
         peerdb->cleanup();
         sleep(15);
     }
